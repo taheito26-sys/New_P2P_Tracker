@@ -1,11 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tracker-platform",
-  "main": "apps/api/src/index.js",
+  "main": "../server/index.ts",
   "compatibility_date": "2026-03-10",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "assets": { "directory": "apps/web/dist" },
   "kv_namespaces": [
     {
       "binding": "P2P_KV",
