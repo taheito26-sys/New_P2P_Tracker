@@ -2451,8 +2451,45 @@ var hashPassword = /* @__PURE__ */ __name(async (password) => {
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }, "hashPassword");
-app.get("/api/status", (c) => {
-  return c.json({ ok: true, lastUpdate: (/* @__PURE__ */ new Date()).toISOString() });
+app.get("/api/status", async (c) => {
+  if (!c.env.P2P_KV) {
+    return c.json({ ok: true, lastUpdate: (/* @__PURE__ */ new Date()).toISOString() });
+  }
+  const raw2 = await c.env.P2P_KV.get("p2p:latest");
+  const latest = raw2 ? JSON.parse(raw2) : null;
+  const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const dayRaw = await c.env.P2P_KV.get(`p2p:day:${today}`);
+  const day = dayRaw ? JSON.parse(dayRaw) : null;
+  return c.json({
+    ok: !!latest,
+    lastUpdate: latest?.ts || null,
+    ageMs: latest ? Date.now() - latest.ts : null,
+    sellAvg: latest?.sellAvg || null,
+    buyAvg: latest?.buyAvg || null,
+    pollsToday: day?.polls || 0
+  });
+});
+app.get("/api/latest", async (c) => {
+  if (!c.env.P2P_KV) {
+    const p = await pollAndStore(c.env);
+    return c.json({ ...p.snapshot, history: p.history, dayStats: p.day, source: "fresh-no-kv" });
+  }
+  const [latestRaw, historyRaw] = await Promise.all([c.env.P2P_KV.get("p2p:latest"), c.env.P2P_KV.get("p2p:history")]);
+  const history = historyRaw ? JSON.parse(historyRaw) : [];
+  if (!latestRaw) {
+    const p = await pollAndStore(c.env);
+    return c.json({ ...p.snapshot, history, dayStats: p.day, source: "fresh" });
+  }
+  const latest = JSON.parse(latestRaw);
+  const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const dayRaw = await c.env.P2P_KV.get(`p2p:day:${today}`);
+  const dayStats = dayRaw ? JSON.parse(dayRaw) : null;
+  return c.json({ ...latest, history, dayStats, ageMs: Date.now() - latest.ts, source: "cache" });
+});
+app.get("/api/history", async (c) => {
+  if (!c.env.P2P_KV) return c.json([]);
+  const raw2 = await c.env.P2P_KV.get("p2p:history");
+  return c.json(raw2 ? JSON.parse(raw2) : []);
 });
 var auth = new Hono2();
 auth.post("/signup", async (c) => {
@@ -2947,7 +2984,108 @@ app.onError((err, c) => {
   console.error(err);
   return c.json({ error: err.message }, 500);
 });
-var server_default = app;
+var BINANCE_API = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
+var P2P_HISTORY_POINTS = 288;
+async function fetchSide(tradeType) {
+  const body = JSON.stringify({
+    page: 1,
+    rows: 10,
+    payTypes: [],
+    publisherType: null,
+    asset: "USDT",
+    tradeType,
+    fiat: "QAR",
+    merchantCheck: false
+  });
+  const res = await fetch(BINANCE_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body
+  });
+  if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
+  const json = await res.json();
+  return Array.isArray(json?.data) ? json.data : [];
+}
+__name(fetchSide, "fetchSide");
+function parseSide(data, side) {
+  const offers = data.map((r) => ({
+    price: parseFloat(r?.adv?.price) || 0,
+    min: parseFloat(r?.adv?.minSingleTransAmount) || 0,
+    max: parseFloat(r?.adv?.dynamicMaxSingleTransAmount ?? r?.adv?.maxSingleTransAmount) || 0,
+    nick: String(r?.advertiser?.nickName || ""),
+    methods: (r?.adv?.tradeMethods || []).map((x) => x.tradeMethodName).filter(Boolean),
+    available: parseFloat(r?.adv?.tradableQuantity || r?.adv?.surplusAmount || 0)
+  })).filter((o) => o.price > 0);
+  const sorted = offers.sort((a, b) => side === "sell" ? b.price - a.price : a.price - b.price);
+  const top5 = sorted.slice(0, 5);
+  const avg = top5.length ? top5.reduce((s, x) => s + x.price, 0) / top5.length : null;
+  const best = sorted[0]?.price || null;
+  const depth = top5.reduce((s, x) => {
+    return side === "sell" ? s + Math.min(x.max, x.available > 0 ? x.available * x.price : x.max) : s + Math.min(x.max / (x.price || 1), x.available > 0 ? x.available : x.max / (x.price || 1));
+  }, 0);
+  return { avg, best, depth, offers };
+}
+__name(parseSide, "parseSide");
+async function pollAndStore(env) {
+  const [buyRaw, sellRaw] = await Promise.all([fetchSide("BUY"), fetchSide("SELL")]);
+  const sellSide = parseSide(buyRaw, "sell");
+  const buySide = parseSide(sellRaw, "buy");
+  const ts = Date.now();
+  const spread = sellSide.avg && buySide.avg ? sellSide.avg - buySide.avg : null;
+  const spreadPct = spread && buySide.avg ? spread / buySide.avg * 100 : null;
+  const snapshot = {
+    ts,
+    sellAvg: sellSide.avg,
+    buyAvg: buySide.avg,
+    bestSell: sellSide.best,
+    bestBuy: buySide.best,
+    sellDepth: sellSide.depth,
+    buyDepth: buySide.depth,
+    spread,
+    spreadPct,
+    sellOffers: sellSide.offers,
+    buyOffers: buySide.offers
+  };
+  if (!env.P2P_KV) return { snapshot, history: [], day: null };
+  await env.P2P_KV.put("p2p:latest", JSON.stringify(snapshot), { expirationTtl: 3600 });
+  let history = [];
+  try {
+    const raw2 = await env.P2P_KV.get("p2p:history");
+    if (raw2) history = JSON.parse(raw2);
+  } catch {
+  }
+  history.push({ ts, sellAvg: sellSide.avg, buyAvg: buySide.avg, spread, spreadPct });
+  if (history.length > P2P_HISTORY_POINTS) history = history.slice(-P2P_HISTORY_POINTS);
+  await env.P2P_KV.put("p2p:history", JSON.stringify(history), { expirationTtl: 691200 });
+  const today = new Date(ts).toISOString().slice(0, 10);
+  let day = { date: today, highSell: 0, lowSell: null, highBuy: 0, lowBuy: null, polls: 0 };
+  try {
+    const raw2 = await env.P2P_KV.get(`p2p:day:${today}`);
+    if (raw2) day = JSON.parse(raw2);
+  } catch {
+  }
+  if (sellSide.avg) {
+    day.highSell = Math.max(day.highSell || 0, sellSide.avg);
+    if (day.lowSell === null) day.lowSell = sellSide.avg;
+    else day.lowSell = Math.min(day.lowSell, sellSide.avg);
+  }
+  if (buySide.avg) {
+    day.highBuy = Math.max(day.highBuy || 0, buySide.avg);
+    if (day.lowBuy === null) day.lowBuy = buySide.avg;
+    else day.lowBuy = Math.min(day.lowBuy, buySide.avg);
+  }
+  day.polls = (day.polls || 0) + 1;
+  await env.P2P_KV.put(`p2p:day:${today}`, JSON.stringify(day), { expirationTtl: 172800 });
+  return { snapshot, history, day };
+}
+__name(pollAndStore, "pollAndStore");
+var server_default = {
+  fetch: app.fetch,
+  async scheduled(_event, env, ctx) {
+    if (!env.P2P_KV) return;
+    ctx.waitUntil(pollAndStore(env).catch((err) => console.error("[worker] poll failed:", err.message)));
+  }
+};
 
 // ../node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
 var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {

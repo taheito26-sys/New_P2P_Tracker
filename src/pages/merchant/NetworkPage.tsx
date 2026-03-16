@@ -89,7 +89,7 @@ export default function NetworkPage() {
     e.preventDefault();
     if (query.length < 2) { toast.error('Enter at least 2 characters'); return; }
     try {
-      const res = await api.merchants.search(query);
+      const res = await api.merchant.search(query);
       setResults(res.results);
       setSearched(true);
     } catch (err: any) { toast.error(err.message); }

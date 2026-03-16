@@ -27,8 +27,47 @@ const hashPassword = async (password: string) => {
 };
 
 // Basic status check
-app.get('/api/status', (c) => {
-  return c.json({ ok: true, lastUpdate: new Date().toISOString() });
+app.get('/api/status', async (c) => {
+  if (!c.env.P2P_KV) {
+    return c.json({ ok: true, lastUpdate: new Date().toISOString() });
+  }
+  const raw = await c.env.P2P_KV.get('p2p:latest');
+  const latest = raw ? JSON.parse(raw) : null;
+  const today = new Date().toISOString().slice(0, 10);
+  const dayRaw = await c.env.P2P_KV.get(`p2p:day:${today}`);
+  const day = dayRaw ? JSON.parse(dayRaw) : null;
+  return c.json({
+    ok: !!latest,
+    lastUpdate: latest?.ts || null,
+    ageMs: latest ? Date.now() - latest.ts : null,
+    sellAvg: latest?.sellAvg || null,
+    buyAvg: latest?.buyAvg || null,
+    pollsToday: day?.polls || 0,
+  });
+});
+
+app.get('/api/latest', async (c) => {
+  if (!c.env.P2P_KV) {
+    const p = await pollAndStore(c.env);
+    return c.json({ ...p.snapshot, history: p.history, dayStats: p.day, source: 'fresh-no-kv' });
+  }
+  const [latestRaw, historyRaw] = await Promise.all([c.env.P2P_KV.get('p2p:latest'), c.env.P2P_KV.get('p2p:history')]);
+  const history = historyRaw ? JSON.parse(historyRaw) : [];
+  if (!latestRaw) {
+    const p = await pollAndStore(c.env);
+    return c.json({ ...p.snapshot, history, dayStats: p.day, source: 'fresh' });
+  }
+  const latest = JSON.parse(latestRaw);
+  const today = new Date().toISOString().slice(0, 10);
+  const dayRaw = await c.env.P2P_KV.get(`p2p:day:${today}`);
+  const dayStats = dayRaw ? JSON.parse(dayRaw) : null;
+  return c.json({ ...latest, history, dayStats, ageMs: Date.now() - latest.ts, source: 'cache' });
+});
+
+app.get('/api/history', async (c) => {
+  if (!c.env.P2P_KV) return c.json([]);
+  const raw = await c.env.P2P_KV.get('p2p:history');
+  return c.json(raw ? JSON.parse(raw) : []);
 });
 
 // Auth Routes
@@ -632,4 +671,107 @@ app.onError((err, c) => {
   return c.json({ error: err.message }, 500);
 });
 
-export default app;
+// ─── BINANCE FETCHING LOGIC ───
+const BINANCE_API = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
+const P2P_HISTORY_POINTS = 288; // 24h * 12 points/hour
+
+async function fetchSide(tradeType: string) {
+  const body = JSON.stringify({
+    page: 1, rows: 10, payTypes: [], publisherType: null,
+    asset: 'USDT', tradeType, fiat: 'QAR', merchantCheck: false,
+  });
+  const res = await fetch(BINANCE_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
+  const json = await res.json() as any;
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
+function parseSide(data: any[], side: 'sell' | 'buy') {
+  const offers = data.map((r: any) => ({
+    price: parseFloat(r?.adv?.price) || 0,
+    min: parseFloat(r?.adv?.minSingleTransAmount) || 0,
+    max: parseFloat(r?.adv?.dynamicMaxSingleTransAmount ?? r?.adv?.maxSingleTransAmount) || 0,
+    nick: String(r?.advertiser?.nickName || ''),
+    methods: (r?.adv?.tradeMethods || []).map((x: any) => x.tradeMethodName).filter(Boolean),
+    available: parseFloat(r?.adv?.tradableQuantity || r?.adv?.surplusAmount || 0),
+  })).filter((o: any) => o.price > 0);
+  
+  const sorted = offers.sort((a, b) => side === 'sell' ? b.price - a.price : a.price - b.price);
+  const top5 = sorted.slice(0, 5);
+  const avg = top5.length ? top5.reduce((s, x) => s + x.price, 0) / top5.length : null;
+  const best = sorted[0]?.price || null;
+  
+  const depth = top5.reduce((s, x) => {
+    return side === 'sell'
+      ? s + Math.min(x.max, x.available > 0 ? x.available * x.price : x.max)
+      : s + Math.min(x.max / (x.price || 1), x.available > 0 ? x.available : x.max / (x.price || 1));
+  }, 0);
+  
+  return { avg, best, depth, offers };
+}
+
+async function pollAndStore(env: Bindings) {
+  const [buyRaw, sellRaw] = await Promise.all([fetchSide('BUY'), fetchSide('SELL')]);
+  const sellSide = parseSide(buyRaw, 'sell');
+  const buySide = parseSide(sellRaw, 'buy');
+  const ts = Date.now();
+  
+  const spread = (sellSide.avg && buySide.avg) ? sellSide.avg - buySide.avg : null;
+  const spreadPct = (spread && buySide.avg) ? (spread / buySide.avg) * 100 : null;
+  
+  const snapshot = {
+    ts,
+    sellAvg: sellSide.avg, buyAvg: buySide.avg,
+    bestSell: sellSide.best, bestBuy: buySide.best,
+    sellDepth: sellSide.depth, buyDepth: buySide.depth,
+    spread, spreadPct,
+    sellOffers: sellSide.offers, buyOffers: buySide.offers,
+  };
+  
+  if (!env.P2P_KV) return { snapshot, history: [], day: null };
+  
+  await env.P2P_KV.put('p2p:latest', JSON.stringify(snapshot), { expirationTtl: 3600 });
+  
+  let history: any[] = [];
+  try {
+    const raw = await env.P2P_KV.get('p2p:history');
+    if (raw) history = JSON.parse(raw);
+  } catch {}
+  history.push({ ts, sellAvg: sellSide.avg, buyAvg: buySide.avg, spread, spreadPct });
+  if (history.length > P2P_HISTORY_POINTS) history = history.slice(-P2P_HISTORY_POINTS);
+  await env.P2P_KV.put('p2p:history', JSON.stringify(history), { expirationTtl: 691200 }); // 8 days
+  
+  const today = new Date(ts).toISOString().slice(0, 10);
+  let day = { date: today, highSell: 0, lowSell: null as number | null, highBuy: 0, lowBuy: null as number | null, polls: 0 };
+  try {
+    const raw = await env.P2P_KV.get(`p2p:day:${today}`);
+    if (raw) day = JSON.parse(raw);
+  } catch {}
+  
+  if (sellSide.avg) {
+    day.highSell = Math.max(day.highSell || 0, sellSide.avg);
+    if (day.lowSell === null) day.lowSell = sellSide.avg;
+    else day.lowSell = Math.min(day.lowSell, sellSide.avg);
+  }
+  if (buySide.avg) {
+    day.highBuy = Math.max(day.highBuy || 0, buySide.avg);
+    if (day.lowBuy === null) day.lowBuy = buySide.avg;
+    else day.lowBuy = Math.min(day.lowBuy, buySide.avg);
+  }
+  day.polls = (day.polls || 0) + 1;
+  await env.P2P_KV.put(`p2p:day:${today}`, JSON.stringify(day), { expirationTtl: 172800 }); // 2 days
+  
+  return { snapshot, history, day };
+}
+
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: any, env: Bindings, ctx: any) {
+    if (!env.P2P_KV) return;
+    ctx.waitUntil(pollAndStore(env).catch((err: any) => console.error('[worker] poll failed:', err.message)));
+  }
+};
