@@ -2491,12 +2491,19 @@ auth.post("/logout", async (c) => {
 var requireAuth = /* @__PURE__ */ __name(async (c, next) => {
   const authHeader = c.req.header("Authorization");
   let userId = c.req.header("X-User-Id");
+  console.log("[requireAuth] Path:", c.req.path);
+  console.log("[requireAuth] Auth Header:", authHeader ? "Present" : "Missing");
+  console.log("[requireAuth] X-User-Id Header:", userId || "Missing");
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.split(" ")[1];
     const session = await c.env.DB.prepare('SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime("now")').bind(token).first();
+    console.log("[requireAuth] Session lookup for token:", session ? "Found" : "Not Found");
     if (session) userId = session.user_id;
   }
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
+  if (!userId) {
+    console.log("[requireAuth] Rejecting - No user ID resolved");
+    return c.json({ error: "Unauthorized" }, 401);
+  }
   c.set("userId", userId);
   await next();
 }, "requireAuth");
@@ -2544,12 +2551,259 @@ merchant.post("/profile/ensure", async (c) => {
     return c.json({ error: e.message }, 500);
   }
 });
-merchant.get("/relationships", (c) => c.json({ relationships: [] }));
-merchant.get("/deals", (c) => c.json({ deals: [] }));
-merchant.get("/messages/:id/messages", (c) => c.json({ messages: [] }));
-merchant.get("/approvals/inbox", (c) => c.json({ approvals: [] }));
-merchant.get("/approvals/sent", (c) => c.json({ approvals: [] }));
-merchant.get("/audit/activity", (c) => c.json({ logs: [] }));
+merchant.get("/search", async (c) => {
+  const q = c.req.query("q");
+  if (!q) return c.json({ results: [] });
+  const results = await c.env.DB.prepare(
+    `SELECT id, merchant_id, nickname, display_name, merchant_type, region 
+     FROM merchant_profiles 
+     WHERE nickname LIKE ? OR display_name LIKE ? OR merchant_id LIKE ? LIMIT 20`
+  ).bind(`%${q}%`, `%${q}%`, `%${q}%`).all();
+  return c.json({ results: results.results });
+});
+merchant.get("/invites/inbox", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ invites: [] });
+  const results = await c.env.DB.prepare(`
+    SELECT i.*, p.display_name as from_display_name, p.nickname as from_nickname
+    FROM merchant_invites i
+    JOIN merchant_profiles p ON i.from_merchant_id = p.merchant_id
+    WHERE i.to_merchant_id = ? ORDER BY i.created_at DESC
+  `).bind(profile.merchant_id).all();
+  return c.json({ invites: results.results });
+});
+merchant.get("/invites/sent", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ invites: [] });
+  const results = await c.env.DB.prepare(`
+    SELECT i.*, p.display_name as to_display_name, p.nickname as to_nickname
+    FROM merchant_invites i
+    LEFT JOIN merchant_profiles p ON i.to_merchant_id = p.merchant_id
+    WHERE i.from_merchant_id = ? ORDER BY i.created_at DESC
+  `).bind(profile.merchant_id).all();
+  return c.json({ invites: results.results });
+});
+merchant.post("/invites", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ error: "No profile" }, 400);
+  const body = await c.req.json();
+  const id = `inv_${crypto.randomUUID()}`;
+  await c.env.DB.prepare(`
+    INSERT INTO merchant_invites (id, from_merchant_id, to_merchant_id, purpose, requested_role, message)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(id, profile.merchant_id, body.to_merchant_id, body.purpose || "", body.requested_role || "operator", body.message || "").run();
+  return c.json({ ok: true });
+});
+merchant.post("/invites/:id/accept", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id, id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ error: "No profile" }, 400);
+  const inviteId = c.req.param("id");
+  const invite = await c.env.DB.prepare("SELECT * FROM merchant_invites WHERE id = ? AND to_merchant_id = ? AND status = ?").bind(inviteId, profile.merchant_id, "pending").first();
+  if (!invite) return c.json({ error: "Invite not found or already processed" }, 400);
+  const relId = `rel_${crypto.randomUUID()}`;
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE merchant_invites SET status = ? WHERE id = ?").bind("accepted", inviteId),
+    c.env.DB.prepare(`
+      INSERT INTO merchant_relationships (id, merchant_a_id, merchant_b_id, invite_id)
+      VALUES (?, ?, ?, ?)
+    `).bind(relId, invite.from_merchant_id, invite.to_merchant_id, inviteId),
+    c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, "relationship", relId, "created")
+  ]);
+  return c.json({ ok: true, relationship_id: relId });
+});
+merchant.post("/invites/:id/reject", async (c) => {
+  await c.env.DB.prepare("UPDATE merchant_invites SET status = ? WHERE id = ?").bind("rejected", c.req.param("id")).run();
+  return c.json({ ok: true });
+});
+merchant.post("/invites/:id/withdraw", async (c) => {
+  await c.env.DB.prepare("UPDATE merchant_invites SET status = ? WHERE id = ?").bind("withdrawn", c.req.param("id")).run();
+  return c.json({ ok: true });
+});
+merchant.get("/relationships", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ relationships: [] });
+  const results = await c.env.DB.prepare(`
+    SELECT r.*, 
+    CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END as counterparty_id,
+    p.display_name, p.nickname, p.merchant_id as cp_merchant_id
+    FROM merchant_relationships r
+    JOIN merchant_profiles p ON p.merchant_id = (CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END)
+    WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
+  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
+  const relationships = results.results.map((r) => ({
+    id: r.id,
+    relationship_type: r.relationship_type,
+    status: r.status,
+    counterparty: {
+      merchant_id: r.cp_merchant_id,
+      display_name: r.display_name,
+      nickname: r.nickname
+    },
+    my_role: "owner",
+    summary: { totalDeals: 0, activeExposure: 0, realizedProfit: 0, pendingApprovals: 0 }
+  }));
+  return c.json({ relationships });
+});
+merchant.get("/deals", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ deals: [] });
+  const relParam = c.req.query("relationship_id");
+  let query = `
+    SELECT d.*, r.merchant_a_id, r.merchant_b_id 
+    FROM merchant_deals d
+    JOIN merchant_relationships r ON d.relationship_id = r.id
+    WHERE (r.merchant_a_id = ? OR r.merchant_b_id = ?)
+  `;
+  const binds = [profile.merchant_id, profile.merchant_id];
+  if (relParam) {
+    query += " AND d.relationship_id = ?";
+    binds.push(relParam);
+  }
+  const results = await c.env.DB.prepare(query).bind(...binds).all();
+  return c.json({ deals: results.results });
+});
+merchant.post("/deals", async (c) => {
+  const userId = c.get("userId");
+  const body = await c.req.json();
+  const id = `deal_${crypto.randomUUID()}`;
+  await c.env.DB.prepare(`
+    INSERT INTO merchant_deals (id, relationship_id, deal_type, title, amount, currency, status, created_by, due_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(id, body.relationship_id, body.deal_type || "general", body.title, body.amount || 0, body.currency || "USDT", "active", userId, body.due_date || null).run();
+  await c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, "deal", id, "created").run();
+  const deal = await c.env.DB.prepare("SELECT * FROM merchant_deals WHERE id = ?").bind(id).first();
+  return c.json({ ok: true, deal });
+});
+merchant.post("/deals/:id/submit-settlement", async (c) => {
+  const dealId = c.req.param("id");
+  const userId = c.get("userId");
+  const body = await c.req.json();
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  const deal = await c.env.DB.prepare("SELECT relationship_id FROM merchant_deals WHERE id = ?").bind(dealId).first();
+  if (!deal) return c.json({ error: "Deal not found" }, 404);
+  const stlId = `stl_${crypto.randomUUID()}`;
+  const aprId = `apr_${crypto.randomUUID()}`;
+  await c.env.DB.batch([
+    c.env.DB.prepare(`
+      INSERT INTO merchant_settlements (id, relationship_id, deal_id, submitted_by_user_id, amount, currency, note, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(stlId, deal.relationship_id, dealId, userId, body.amount, body.currency || "USDT", body.note || "", "pending"),
+    c.env.DB.prepare(`
+      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
+      VALUES (?, ?, 'settlement_submission', 'settlement', ?, ?, ?, 'system')
+    `).bind(aprId, deal.relationship_id, stlId, userId, profile?.merchant_id || ""),
+    c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, "deal", dealId, "settlement_submitted")
+  ]);
+  return c.json({ ok: true, settlement_id: stlId, approval_id: aprId });
+});
+merchant.post("/deals/:id/record-profit", async (c) => {
+  const dealId = c.req.param("id");
+  const userId = c.get("userId");
+  const body = await c.req.json();
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  const deal = await c.env.DB.prepare("SELECT relationship_id FROM merchant_deals WHERE id = ?").bind(dealId).first();
+  if (!deal) return c.json({ error: "Deal not found" }, 404);
+  const profitId = `prf_${crypto.randomUUID()}`;
+  const aprId = `apr_${crypto.randomUUID()}`;
+  await c.env.DB.batch([
+    c.env.DB.prepare(`
+      INSERT INTO merchant_profit_records (id, relationship_id, deal_id, period_key, amount, currency, note, status, submitted_by_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(profitId, deal.relationship_id, dealId, body.period_key || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), body.amount, body.currency || "USDT", body.note || "", "pending", userId),
+    c.env.DB.prepare(`
+      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
+      VALUES (?, ?, 'profit_submission', 'profit', ?, ?, ?, 'system')
+    `).bind(aprId, deal.relationship_id, profitId, userId, profile?.merchant_id || ""),
+    c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, "deal", dealId, "profit_submitted")
+  ]);
+  return c.json({ ok: true, profit_id: profitId, approval_id: aprId });
+});
+merchant.get("/messages/:id/messages", async (c) => {
+  const relId = c.req.param("id");
+  const results = await c.env.DB.prepare(`
+    SELECT m.*, p.display_name as sender_name 
+    FROM merchant_messages m 
+    LEFT JOIN merchant_profiles p ON m.sender_user_id = p.user_id 
+    WHERE m.relationship_id = ? ORDER BY m.created_at ASC
+  `).bind(relId).all();
+  return c.json({ messages: results.results });
+});
+merchant.post("/messages/:id/messages", async (c) => {
+  const relId = c.req.param("id");
+  const userId = c.get("userId");
+  const body = await c.req.json();
+  const msgId = `msg_${crypto.randomUUID()}`;
+  await c.env.DB.prepare(`
+    INSERT INTO merchant_messages (id, relationship_id, sender_user_id, body, message_type)
+    VALUES (?, ?, ?, ?, ?)
+  `).bind(msgId, relId, userId, body.body, body.message_type || "text").run();
+  const msg = await c.env.DB.prepare("SELECT * FROM merchant_messages WHERE id = ?").bind(msgId).first();
+  return c.json({ ok: true, message: msg });
+});
+merchant.get("/approvals/inbox", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ approvals: [] });
+  const results = await c.env.DB.prepare(`
+    SELECT a.* 
+    FROM merchant_approvals a
+    JOIN merchant_relationships r ON a.relationship_id = r.id
+    WHERE (r.merchant_a_id = ? OR r.merchant_b_id = ?) AND a.submitted_by_merchant_id != ? AND a.status = 'pending'
+  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
+  return c.json({ approvals: results.results });
+});
+merchant.get("/approvals/sent", async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ approvals: [] });
+  const results = await c.env.DB.prepare(`
+    SELECT * FROM merchant_approvals WHERE submitted_by_merchant_id = ? ORDER BY created_at DESC
+  `).bind(profile.merchant_id).all();
+  return c.json({ approvals: results.results });
+});
+merchant.post("/approvals/:id/approve", async (c) => {
+  const approvalId = c.req.param("id");
+  const userId = c.get("userId");
+  const approval = await c.env.DB.prepare("SELECT * FROM merchant_approvals WHERE id = ? AND status = ?").bind(approvalId, "pending").first();
+  if (!approval) return c.json({ error: "Approval not found" }, 404);
+  const updates = [
+    c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolved_at = datetime("now") WHERE id = ?').bind("approved", approvalId)
+  ];
+  if (approval.target_entity_type === "settlement") {
+    updates.push(c.env.DB.prepare('UPDATE merchant_settlements SET status = ?, approved_at = datetime("now") WHERE id = ?').bind("approved", approval.target_entity_id));
+    const settlement = await c.env.DB.prepare("SELECT deal_id FROM merchant_settlements WHERE id = ?").bind(approval.target_entity_id).first();
+    if (settlement) {
+      updates.push(c.env.DB.prepare("UPDATE merchant_deals SET status = ? WHERE id = ?").bind("settled", settlement.deal_id));
+    }
+  } else if (approval.target_entity_type === "profit") {
+    updates.push(c.env.DB.prepare('UPDATE merchant_profit_records SET status = ?, approved_at = datetime("now") WHERE id = ?').bind("approved", approval.target_entity_id));
+    const profit = await c.env.DB.prepare("SELECT deal_id, amount FROM merchant_profit_records WHERE id = ?").bind(approval.target_entity_id).first();
+    if (profit) {
+      updates.push(c.env.DB.prepare("UPDATE merchant_deals SET realized_pnl = coalesce(realized_pnl, 0) + ? WHERE id = ?").bind(profit.amount, profit.deal_id));
+    }
+  }
+  updates.push(c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, approval.target_entity_type, approval.target_entity_id, "approved"));
+  await c.env.DB.batch(updates);
+  return c.json({ ok: true });
+});
+merchant.post("/approvals/:id/reject", async (c) => {
+  const approvalId = c.req.param("id");
+  const userId = c.get("userId");
+  await c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolved_at = datetime("now") WHERE id = ?').bind("rejected", approvalId).run();
+  await c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, "approval", approvalId, "rejected").run();
+  return c.json({ ok: true });
+});
+merchant.get("/audit/activity", async (c) => {
+  const userId = c.get("userId");
+  const results = await c.env.DB.prepare("SELECT * FROM merchant_audit_logs WHERE actor_user_id = ? ORDER BY created_at DESC LIMIT 50").bind(userId).all();
+  return c.json({ logs: results.results });
+});
 app.route("/api/merchant", merchant);
 app.get("/api/merchant/notifications", (c) => c.json({ notifications: [] }));
 app.get("/api/batches", (c) => c.json({ batches: [] }));
@@ -2568,6 +2822,37 @@ app.get("/api/latest", (c) => c.json({
   buyOffers: []
 }));
 app.get("/api/history", (c) => c.json([]));
+app.get("/api/analytics", requireAuth, async (c) => {
+  const userId = c.get("userId");
+  const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
+  if (!profile) return c.json({ error: "No profile" }, 404);
+  const deals = await c.env.DB.prepare(`
+    SELECT d.* FROM merchant_deals d 
+    JOIN merchant_relationships r ON d.relationship_id = r.id 
+    WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
+  `).bind(profile.merchant_id, profile.merchant_id).all();
+  let totalDeployed = 0;
+  let realizedProfit = 0;
+  let overdueExposure = 0;
+  deals.results.forEach((d) => {
+    if (d.status === "active" || d.status === "overdue" || d.status === "due") {
+      totalDeployed += d.amount;
+    }
+    if (d.realized_pnl) realizedProfit += d.realized_pnl;
+    if (d.status === "active" && d.due_date && new Date(d.due_date) < /* @__PURE__ */ new Date()) {
+      overdueExposure += d.amount;
+    } else if (d.status === "overdue") {
+      overdueExposure += d.amount;
+    }
+  });
+  const relsCount = await c.env.DB.prepare(`SELECT count(id) as c FROM merchant_relationships WHERE merchant_a_id = ? OR merchant_b_id = ?`).bind(profile.merchant_id, profile.merchant_id).first();
+  return c.json({
+    totalDeployed,
+    realizedProfit,
+    overdueExposure,
+    activeRelationships: relsCount?.c || 0
+  });
+});
 app.onError((err, c) => {
   console.error(err);
   return c.json({ error: err.message }, 500);

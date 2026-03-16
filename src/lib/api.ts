@@ -366,6 +366,17 @@ export const preferences = {
     }),
 };
 
+// ─── Analytics API ──────────────────────────────────────────────────
+export const analytics = {
+  get: () =>
+    request<{
+      totalDeployed: number;
+      realizedProfit: number;
+      overdueExposure: number;
+      activeRelationships: number;
+    }>('/api/analytics'),
+};
+
 // ─── Import API ─────────────────────────────────────────────────────
 export const importApi = {
   json: (data: { idempotency_key: string; batches?: unknown[]; trades?: unknown[] }) =>

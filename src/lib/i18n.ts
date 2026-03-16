@@ -29,7 +29,8 @@ const translations = {
   orders: { en: 'Orders', ar: 'الطلبات' },
   stock: { en: 'Stock', ar: 'المخزون' },
   calendar: { en: 'Calendar', ar: 'التقويم' },
-  p2pTracker: { en: 'P2P Tracker', ar: 'متتبع P2P' },
+  p2pTracker: { en: 'P2P Market', ar: 'سوق P2P' },
+  
   portfolio: { en: 'Portfolio', ar: 'المحفظة' },
   trades: { en: 'Trades', ar: 'الصفقات' },
   crm: { en: 'CRM', ar: 'إدارة العملاء' },
