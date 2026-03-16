@@ -67,16 +67,28 @@ auth.post('/login', async (c) => {
   await c.env.DB.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)')
     .bind(token, user.id, expiresAt)
     .run();
+    
+  c.header('Set-Cookie', `session=${token}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax`);
 
   return c.json({ ok: true, token, user_id: user.id });
 });
 
 auth.post('/logout', async (c) => {
+  let token = null;
   const authHeader = c.req.header('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
+    token = authHeader.split(' ')[1];
+  } else {
+    const cookieHeader = c.req.header('Cookie');
+    if (cookieHeader) {
+      const match = cookieHeader.match(/session=([^;]+)/);
+      if (match) token = match[1];
+    }
+  }
+  if (token) {
     await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(token).run();
   }
+  c.header('Set-Cookie', `session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
   return c.json({ ok: true });
 });
 
@@ -84,20 +96,26 @@ const requireAuth = async (c: any, next: any) => {
   const authHeader = c.req.header('Authorization');
   let userId = c.req.header('X-User-Id');
   
-  console.log('[requireAuth] Path:', c.req.path);
-  console.log('[requireAuth] Auth Header:', authHeader ? 'Present' : 'Missing');
-  console.log('[requireAuth] X-User-Id Header:', userId || 'Missing');
-  
+  // Try finding session ID from cookie if explicit headers are missing
+  let token = null;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
+    token = authHeader.split(' ')[1];
+  } else {
+    // Basic cookie parsing
+    const cookieHeader = c.req.header('Cookie');
+    if (cookieHeader) {
+      const match = cookieHeader.match(/session=([^;]+)/);
+      if (match) token = match[1];
+    }
+  }
+  
+  if (token) {
     const session = await c.env.DB.prepare('SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime("now")')
       .bind(token).first() as {user_id: string} | null;
-    console.log('[requireAuth] Session lookup for token:', session ? 'Found' : 'Not Found');
     if (session) userId = session.user_id;
   }
   
   if (!userId) {
-    console.log('[requireAuth] Rejecting - No user ID resolved');
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
