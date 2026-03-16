@@ -480,6 +480,13 @@ merchant.post('/approvals/:id/reject', async (c) => {
   return c.json({ ok: true });
 });
 
+merchant.get('/audit/relationship/:id', async (c) => {
+  const relId = c.req.param('id');
+  const results = await c.env.DB.prepare('SELECT * FROM merchant_audit_logs WHERE entity_type = "relationship" AND entity_id = ? OR action LIKE ? ORDER BY created_at DESC LIMIT 50')
+    .bind(relId, `%${relId}%`).all();
+  return c.json({ logs: results.results });
+});
+
 merchant.get('/audit/activity', async (c) => {
   const userId = c.get('userId');
   const results = await c.env.DB.prepare('SELECT * FROM merchant_audit_logs WHERE actor_user_id = ? ORDER BY created_at DESC LIMIT 50').bind(userId).all();
@@ -503,39 +510,119 @@ app.get('/api/history', (c) => c.json([]));
 app.get('/api/analytics', requireAuth, async (c: any) => {
   const userId = c.get('userId');
   const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  if(!profile) return c.json({ error: 'No profile' }, 404);
+  if (!profile) return c.json({ error: 'No profile' }, 404);
   
+  // 1. Fetch relationships to build counterparty map
+  const rels = await c.env.DB.prepare(`
+    SELECT r.*, p.merchant_id as cp_merchant_id, p.display_name cp_name
+    FROM merchant_relationships r
+    JOIN merchant_profiles p ON p.merchant_id = (CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END)
+    WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
+  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
+
+  // 2. Fetch all deals across these relationships
   const deals = await c.env.DB.prepare(`
-    SELECT d.* FROM merchant_deals d 
+    SELECT d.*, r.merchant_a_id, r.merchant_b_id 
+    FROM merchant_deals d 
     JOIN merchant_relationships r ON d.relationship_id = r.id 
     WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
   `).bind(profile.merchant_id, profile.merchant_id).all();
   
   let totalDeployed = 0;
+  let activeDeployed = 0;
+  let returnedCapital = 0;
   let realizedProfit = 0;
-  let overdueExposure = 0;
+  let unsettledExposure = 0;
+  let overdueDeals = 0;
   
+  const dealsByType: Record<string, number> = {};
+  
+  const cpMap = new Map<string, {name: string, deployed: number, returned: number, profit: number}>();
+  rels.results.forEach((r: any) => {
+    cpMap.set(r.id, {
+      name: r.cp_name || r.cp_merchant_id,
+      deployed: 0, returned: 0, profit: 0
+    });
+  });
+
+  const today = new Date().toISOString().split('T')[0];
+
   deals.results.forEach((d: any) => {
-    if (d.status === 'active' || d.status === 'overdue' || d.status === 'due') {
-      totalDeployed += d.amount;
-    }
-    if (d.realized_pnl) realizedProfit += d.realized_pnl;
+    const isActive = ['active', 'due', 'overdue'].includes(d.status);
+    const isSettled = ['settled', 'closed'].includes(d.status);
     
-    // Risk logic (Scenario F)
-    if (d.status === 'active' && d.due_date && new Date(d.due_date) < new Date()) {
-       overdueExposure += d.amount;
-    } else if (d.status === 'overdue') {
-       overdueExposure += d.amount;
+    // Check overdue
+    let isOverdue = d.status === 'overdue';
+    if (d.due_date && d.due_date < today && isActive) isOverdue = true;
+    if (isOverdue) overdueDeals++;
+
+    totalDeployed += d.amount;
+    if (isActive) {
+      activeDeployed += d.amount;
+      unsettledExposure += d.amount;
+    }
+    if (isSettled) returnedCapital += d.amount;
+    if (d.realized_pnl) realizedProfit += d.realized_pnl;
+
+    dealsByType[d.deal_type] = (dealsByType[d.deal_type] || 0) + 1;
+
+    const cp = cpMap.get(d.relationship_id);
+    if (cp) {
+      cp.deployed += d.amount;
+      if (isSettled) cp.returned += d.amount;
+      if (d.realized_pnl) cp.profit += d.realized_pnl;
     }
   });
+
+  const capitalByCounterparty = [...cpMap.values()].map(c => ({
+    ...c,
+    roi: c.deployed > 0 ? (c.profit / c.deployed) * 100 : 0
+  }));
+
+  // Risk indicators
+  const riskIndicators = [];
+  if (overdueDeals > 0) {
+    riskIndicators.push({
+      type: 'overdue', severity: 'high',
+      message: `${overdueDeals} deal(s) overdue.`
+    });
+  }
   
-  const relsCount = await c.env.DB.prepare(`SELECT count(id) as c FROM merchant_relationships WHERE merchant_a_id = ? OR merchant_b_id = ?`).bind(profile.merchant_id, profile.merchant_id).first() as {c:number} | null;
-  
+  for (const cp of capitalByCounterparty) {
+    const pct = totalDeployed > 0 ? (cp.deployed / totalDeployed) * 100 : 0;
+    if (pct > 50) {
+      riskIndicators.push({
+        type: 'concentration', severity: 'medium',
+        message: `${cp.name} represents ${pct.toFixed(0)}% of exposure`
+      });
+    }
+  }
+
+  // Pending approvals
+  const pendingApprovalsCount = await c.env.DB.prepare(`
+    SELECT count(id) as c FROM merchant_approvals WHERE reviewer_user_id = ? AND status = 'pending'
+  `).bind(userId).first() as {c: number} | null;
+  const pendingApprovals = pendingApprovalsCount?.c || 0;
+
+  if (pendingApprovals > 3) {
+    riskIndicators.push({
+      type: 'backlog', severity: 'low',
+      message: `${pendingApprovals} pending approvals.`
+    });
+  }
+
   return c.json({
     totalDeployed,
+    activeDeployed,
+    returnedCapital,
     realizedProfit,
-    overdueExposure,
-    activeRelationships: relsCount?.c || 0
+    unsettledExposure,
+    overdueDeals,
+    activeRelationships: rels.results.filter((r:any) => r.status === 'active').length,
+    pendingApprovals,
+    capitalByCounterparty,
+    dealsByType,
+    riskIndicators
   });
 });
 

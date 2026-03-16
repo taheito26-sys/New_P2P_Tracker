@@ -2814,6 +2814,11 @@ merchant.post("/approvals/:id/reject", async (c) => {
   await c.env.DB.prepare("INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)").bind(`aud_${crypto.randomUUID()}`, userId, "approval", approvalId, "rejected").run();
   return c.json({ ok: true });
 });
+merchant.get("/audit/relationship/:id", async (c) => {
+  const relId = c.req.param("id");
+  const results = await c.env.DB.prepare('SELECT * FROM merchant_audit_logs WHERE entity_type = "relationship" AND entity_id = ? OR action LIKE ? ORDER BY created_at DESC LIMIT 50').bind(relId, `%${relId}%`).all();
+  return c.json({ logs: results.results });
+});
 merchant.get("/audit/activity", async (c) => {
   const userId = c.get("userId");
   const results = await c.env.DB.prepare("SELECT * FROM merchant_audit_logs WHERE actor_user_id = ? ORDER BY created_at DESC LIMIT 50").bind(userId).all();
@@ -2841,31 +2846,101 @@ app.get("/api/analytics", requireAuth, async (c) => {
   const userId = c.get("userId");
   const profile = await c.env.DB.prepare("SELECT merchant_id FROM merchant_profiles WHERE user_id = ?").bind(userId).first();
   if (!profile) return c.json({ error: "No profile" }, 404);
+  const rels = await c.env.DB.prepare(`
+    SELECT r.*, p.merchant_id as cp_merchant_id, p.display_name cp_name
+    FROM merchant_relationships r
+    JOIN merchant_profiles p ON p.merchant_id = (CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END)
+    WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
+  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
   const deals = await c.env.DB.prepare(`
-    SELECT d.* FROM merchant_deals d 
+    SELECT d.*, r.merchant_a_id, r.merchant_b_id 
+    FROM merchant_deals d 
     JOIN merchant_relationships r ON d.relationship_id = r.id 
     WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
   `).bind(profile.merchant_id, profile.merchant_id).all();
   let totalDeployed = 0;
+  let activeDeployed = 0;
+  let returnedCapital = 0;
   let realizedProfit = 0;
-  let overdueExposure = 0;
+  let unsettledExposure = 0;
+  let overdueDeals = 0;
+  const dealsByType = {};
+  const cpMap = /* @__PURE__ */ new Map();
+  rels.results.forEach((r) => {
+    cpMap.set(r.id, {
+      name: r.cp_name || r.cp_merchant_id,
+      deployed: 0,
+      returned: 0,
+      profit: 0
+    });
+  });
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   deals.results.forEach((d) => {
-    if (d.status === "active" || d.status === "overdue" || d.status === "due") {
-      totalDeployed += d.amount;
+    const isActive = ["active", "due", "overdue"].includes(d.status);
+    const isSettled = ["settled", "closed"].includes(d.status);
+    let isOverdue = d.status === "overdue";
+    if (d.due_date && d.due_date < today && isActive) isOverdue = true;
+    if (isOverdue) overdueDeals++;
+    totalDeployed += d.amount;
+    if (isActive) {
+      activeDeployed += d.amount;
+      unsettledExposure += d.amount;
     }
+    if (isSettled) returnedCapital += d.amount;
     if (d.realized_pnl) realizedProfit += d.realized_pnl;
-    if (d.status === "active" && d.due_date && new Date(d.due_date) < /* @__PURE__ */ new Date()) {
-      overdueExposure += d.amount;
-    } else if (d.status === "overdue") {
-      overdueExposure += d.amount;
+    dealsByType[d.deal_type] = (dealsByType[d.deal_type] || 0) + 1;
+    const cp = cpMap.get(d.relationship_id);
+    if (cp) {
+      cp.deployed += d.amount;
+      if (isSettled) cp.returned += d.amount;
+      if (d.realized_pnl) cp.profit += d.realized_pnl;
     }
   });
-  const relsCount = await c.env.DB.prepare(`SELECT count(id) as c FROM merchant_relationships WHERE merchant_a_id = ? OR merchant_b_id = ?`).bind(profile.merchant_id, profile.merchant_id).first();
+  const capitalByCounterparty = [...cpMap.values()].map((c2) => ({
+    ...c2,
+    roi: c2.deployed > 0 ? c2.profit / c2.deployed * 100 : 0
+  }));
+  const riskIndicators = [];
+  if (overdueDeals > 0) {
+    riskIndicators.push({
+      type: "overdue",
+      severity: "high",
+      message: `${overdueDeals} deal(s) overdue.`
+    });
+  }
+  for (const cp of capitalByCounterparty) {
+    const pct = totalDeployed > 0 ? cp.deployed / totalDeployed * 100 : 0;
+    if (pct > 50) {
+      riskIndicators.push({
+        type: "concentration",
+        severity: "medium",
+        message: `${cp.name} represents ${pct.toFixed(0)}% of exposure`
+      });
+    }
+  }
+  const pendingApprovalsCount = await c.env.DB.prepare(`
+    SELECT count(id) as c FROM merchant_approvals WHERE reviewer_user_id = ? AND status = 'pending'
+  `).bind(userId).first();
+  const pendingApprovals = pendingApprovalsCount?.c || 0;
+  if (pendingApprovals > 3) {
+    riskIndicators.push({
+      type: "backlog",
+      severity: "low",
+      message: `${pendingApprovals} pending approvals.`
+    });
+  }
   return c.json({
     totalDeployed,
+    activeDeployed,
+    returnedCapital,
     realizedProfit,
-    overdueExposure,
-    activeRelationships: relsCount?.c || 0
+    unsettledExposure,
+    overdueDeals,
+    activeRelationships: rels.results.filter((r) => r.status === "active").length,
+    pendingApprovals,
+    capitalByCounterparty,
+    dealsByType,
+    riskIndicators
   });
 });
 app.onError((err, c) => {
@@ -2915,7 +2990,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-IzKUWC/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-Ko8Wrc/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -2947,7 +3022,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-IzKUWC/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-Ko8Wrc/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

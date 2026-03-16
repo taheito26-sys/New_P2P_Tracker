@@ -19,6 +19,20 @@ import type {
   UserPreferences,
 } from '@/types/domain';
 
+export interface PortfolioAnalytics {
+  totalDeployed: number;
+  activeDeployed: number;
+  returnedCapital: number;
+  realizedProfit: number;
+  unsettledExposure: number;
+  overdueDeals: number;
+  activeRelationships: number;
+  pendingApprovals: number;
+  capitalByCounterparty: { name: string; deployed: number; returned: number; profit: number; roi: number }[];
+  dealsByType: Record<string, number>;
+  riskIndicators: { type: string; severity: 'high' | 'medium' | 'low'; message: string }[];
+}
+
 // ─── Configuration ──────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -369,12 +383,7 @@ export const preferences = {
 // ─── Analytics API ──────────────────────────────────────────────────
 export const analytics = {
   get: () =>
-    request<{
-      totalDeployed: number;
-      realizedProfit: number;
-      overdueExposure: number;
-      activeRelationships: number;
-    }>('/api/analytics'),
+    request<PortfolioAnalytics>('/api/analytics'),
 };
 
 // ─── Import API ─────────────────────────────────────────────────────

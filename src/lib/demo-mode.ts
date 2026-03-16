@@ -10,8 +10,14 @@ export async function isDemoMode(): Promise<boolean> {
   try {
     const res = await fetch('/api/auth/session', { method: 'GET' });
     const ct = res.headers.get('content-type') || '';
-    // If the response is HTML (Vite fallback) or 404, no backend is running
-    _demoMode = !res.ok || ct.includes('text/html');
+    
+    // A 401 Unauthorized with JSON means the backend IS running.
+    if (res.status === 401 && ct.includes('application/json')) {
+      _demoMode = false;
+    } else {
+      // If the response is HTML (Vite fallback) or 404, no backend is running
+      _demoMode = !res.ok || ct.includes('text/html');
+    }
   } catch {
     _demoMode = true;
   }
