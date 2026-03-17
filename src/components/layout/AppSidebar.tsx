@@ -8,7 +8,6 @@ import {
   MessageSquare,
   Briefcase,
   BarChart3,
-  Shield,
   Settings,
   Bell,
   LogOut,
@@ -38,7 +37,6 @@ const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'deals', icon: Briefcase, path: '/deals' },
   { labelKey: 'analytics', icon: BarChart3, path: '/analytics' },
   { labelKey: 'vault', icon: CloudUpload, path: '/vault' },
-  { labelKey: 'audit', icon: Shield, path: '/audit' },
   { labelKey: 'settings', icon: Settings, path: '/settings' },
 ];
 
