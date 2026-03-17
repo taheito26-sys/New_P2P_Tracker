@@ -4,7 +4,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 
 type Bindings = {
   DB: D1Database;
-  P2P_KV: KVNamespace;
+  P2P_KV?: KVNamespace;
   ALLOWED_ORIGINS?: string;
 };
 
@@ -119,13 +119,47 @@ async function sha256Hex(input: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function hashPassword(password: string): Promise<string> {
-  const iterations = 210_000;
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+const PBKDF2_ITERATIONS = 100_000;
+const MAX_SUBTLE_PBKDF2_ITERATIONS = 100_000;
+
+async function derivePbkdf2Sha256(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  return new Uint8Array(bits);
+}
+
+async function derivePbkdf2Sha256Fallback(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+
+  const block = new Uint8Array(salt.length + 4);
+  block.set(salt, 0);
+  block.set([0, 0, 0, 1], salt.length);
+
+  let u = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, block));
+  const output = u.slice();
+
+  for (let i = 1; i < iterations; i += 1) {
+    u = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, u));
+    for (let j = 0; j < output.length; j += 1) {
+      output[j] ^= u[j];
+    }
+  }
+
+  return output;
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const iterations = PBKDF2_ITERATIONS;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const bits = await derivePbkdf2Sha256(password, salt, iterations);
   const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('');
-  const hashHex = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(bits).map((b) => b.toString(16).padStart(2, '0')).join('');
   return `pbkdf2$${iterations}$${saltHex}$${hashHex}`;
 }
 
@@ -137,14 +171,15 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
   const [scheme, rawIterations, saltHex, expectedHash] = storedHash.split('$');
   if (scheme !== 'pbkdf2' || !rawIterations || !saltHex || !expectedHash) return false;
 
+  const iterations = Number(rawIterations);
+  if (!Number.isFinite(iterations) || iterations < 1) return false;
+
   const salt = new Uint8Array(saltHex.match(/.{1,2}/g)?.map((part) => parseInt(part, 16)) || []);
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Number(rawIterations) },
-    key,
-    256,
-  );
-  const actualHash = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const bits = iterations > MAX_SUBTLE_PBKDF2_ITERATIONS
+    ? await derivePbkdf2Sha256Fallback(password, salt, iterations)
+    : await derivePbkdf2Sha256(password, salt, iterations);
+
+  const actualHash = Array.from(bits).map((b) => b.toString(16).padStart(2, '0')).join('');
   return actualHash === expectedHash;
 }
 
@@ -389,13 +424,22 @@ function buildTrackerSnapshot(now: number): P2PSnapshot {
   };
 }
 
-async function loadTrackerHistory(kv: KVNamespace): Promise<P2PHistoryPoint[]> {
+function trackerKv(env: Bindings): KVNamespace | null {
+  const kv = env.P2P_KV;
+  if (!kv || typeof kv.get !== 'function' || typeof kv.put !== 'function') return null;
+  return kv;
+}
+
+async function loadTrackerHistory(kv: KVNamespace | null): Promise<P2PHistoryPoint[]> {
+  if (!kv) return [];
   const history = await kv.get(TRACKER_HISTORY_KEY, 'json');
   return Array.isArray(history) ? history as P2PHistoryPoint[] : [];
 }
 
 async function persistTrackerSnapshot(env: Bindings, snapshot: P2PSnapshot): Promise<void> {
-  const history = await loadTrackerHistory(env.P2P_KV);
+  const kv = trackerKv(env);
+  if (!kv) return;
+  const history = await loadTrackerHistory(kv);
   const nextPoint: P2PHistoryPoint = {
     ts: snapshot.ts,
     sellAvg: snapshot.sellAvg,
@@ -406,14 +450,19 @@ async function persistTrackerSnapshot(env: Bindings, snapshot: P2PSnapshot): Pro
 
   const trimmedHistory = [...history, nextPoint].slice(-TRACKER_HISTORY_LIMIT);
   await Promise.all([
-    env.P2P_KV.put(TRACKER_LATEST_KEY, JSON.stringify(snapshot)),
-    env.P2P_KV.put(TRACKER_HISTORY_KEY, JSON.stringify(trimmedHistory)),
+    kv.put(TRACKER_LATEST_KEY, JSON.stringify(snapshot)),
+    kv.put(TRACKER_HISTORY_KEY, JSON.stringify(trimmedHistory)),
   ]);
 }
 
 async function ensureTrackerState(env: Bindings): Promise<{ snapshot: P2PSnapshot; history: P2PHistoryPoint[] }> {
-  const latest = await env.P2P_KV.get(TRACKER_LATEST_KEY, 'json') as P2PSnapshot | null;
-  const history = await loadTrackerHistory(env.P2P_KV);
+  const kv = trackerKv(env);
+  if (!kv) {
+    return { snapshot: buildTrackerSnapshot(Date.now()), history: [] };
+  }
+
+  const latest = await kv.get(TRACKER_LATEST_KEY, 'json') as P2PSnapshot | null;
+  const history = await loadTrackerHistory(kv);
 
   if (latest && history.length > 0) {
     return { snapshot: latest, history };
@@ -423,7 +472,7 @@ async function ensureTrackerState(env: Bindings): Promise<{ snapshot: P2PSnapsho
   await persistTrackerSnapshot(env, snapshot);
   return {
     snapshot,
-    history: await loadTrackerHistory(env.P2P_KV),
+    history: await loadTrackerHistory(kv),
   };
 }
 
@@ -1187,6 +1236,7 @@ app.onError((error, c) => c.json({ error: error.message }, 500));
 const worker = {
   fetch: app.fetch,
   scheduled: async (_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) => {
+    if (!trackerKv(env)) return;
     const snapshot = buildTrackerSnapshot(Date.now());
     await persistTrackerSnapshot(env, snapshot);
   },
