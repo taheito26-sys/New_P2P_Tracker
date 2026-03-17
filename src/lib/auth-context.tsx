@@ -14,6 +14,15 @@ interface AuthState {
   signup: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  ensureMerchantProfile: (data: {
+    nickname: string;
+    display_name: string;
+    merchant_type?: string;
+    region?: string;
+    default_currency?: string;
+    discoverability?: string;
+    bio?: string;
+  }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -106,6 +115,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }, []);
 
+  const ensureMerchantProfile = useCallback(async (data: {
+    nickname: string;
+    display_name: string;
+    merchant_type?: string;
+    region?: string;
+    default_currency?: string;
+    discoverability?: string;
+    bio?: string;
+  }) => {
+    const { profile: created } = await merchant.ensureProfile(data);
+    setProfile(created);
+  }, []);
+
   return (
     <AuthContext.Provider value={{
       isLoading,
@@ -118,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signup,
       logout,
       refreshProfile,
+      ensureMerchantProfile,
     }}>
       {children}
     </AuthContext.Provider>

@@ -13,7 +13,7 @@ import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function OnboardingPage() {
-  const { refreshProfile } = useAuth();
+  const { ensureMerchantProfile } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [nicknameStatus, setNicknameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
@@ -47,10 +47,9 @@ export default function OnboardingPage() {
     }
     setLoading(true);
     try {
-      await merchantApi.ensureProfile(form);
-      await refreshProfile();
+      await ensureMerchantProfile(form);
       toast.success('Merchant portfolio created!');
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       toast.error(err.message || 'Failed to create profile');
     } finally {
