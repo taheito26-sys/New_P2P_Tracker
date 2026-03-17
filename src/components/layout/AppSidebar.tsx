@@ -5,7 +5,6 @@ import {
   Wallet,
   TrendingUp,
   Users,
-  MessageSquare,
   Briefcase,
   BarChart3,
   Settings,
@@ -33,7 +32,6 @@ const tradingNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
 
 const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'network', icon: Users, path: '/network' },
-  { labelKey: 'messages', icon: MessageSquare, path: '/messages' },
   { labelKey: 'deals', icon: Briefcase, path: '/deals' },
   { labelKey: 'analytics', icon: BarChart3, path: '/analytics' },
   { labelKey: 'vault', icon: CloudUpload, path: '/vault' },
