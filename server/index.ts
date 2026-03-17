@@ -119,13 +119,47 @@ async function sha256Hex(input: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function hashPassword(password: string): Promise<string> {
-  const iterations = 210_000;
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+const PBKDF2_ITERATIONS = 100_000;
+const MAX_SUBTLE_PBKDF2_ITERATIONS = 100_000;
+
+async function derivePbkdf2Sha256(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  return new Uint8Array(bits);
+}
+
+async function derivePbkdf2Sha256Fallback(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+
+  const block = new Uint8Array(salt.length + 4);
+  block.set(salt, 0);
+  block.set([0, 0, 0, 1], salt.length);
+
+  let u = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, block));
+  const output = u.slice();
+
+  for (let i = 1; i < iterations; i += 1) {
+    u = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, u));
+    for (let j = 0; j < output.length; j += 1) {
+      output[j] ^= u[j];
+    }
+  }
+
+  return output;
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const iterations = PBKDF2_ITERATIONS;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const bits = await derivePbkdf2Sha256(password, salt, iterations);
   const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('');
-  const hashHex = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(bits).map((b) => b.toString(16).padStart(2, '0')).join('');
   return `pbkdf2$${iterations}$${saltHex}$${hashHex}`;
 }
 
@@ -137,14 +171,15 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
   const [scheme, rawIterations, saltHex, expectedHash] = storedHash.split('$');
   if (scheme !== 'pbkdf2' || !rawIterations || !saltHex || !expectedHash) return false;
 
+  const iterations = Number(rawIterations);
+  if (!Number.isFinite(iterations) || iterations < 1) return false;
+
   const salt = new Uint8Array(saltHex.match(/.{1,2}/g)?.map((part) => parseInt(part, 16)) || []);
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Number(rawIterations) },
-    key,
-    256,
-  );
-  const actualHash = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const bits = iterations > MAX_SUBTLE_PBKDF2_ITERATIONS
+    ? await derivePbkdf2Sha256Fallback(password, salt, iterations)
+    : await derivePbkdf2Sha256(password, salt, iterations);
+
+  const actualHash = Array.from(bits).map((b) => b.toString(16).padStart(2, '0')).join('');
   return actualHash === expectedHash;
 }
 
