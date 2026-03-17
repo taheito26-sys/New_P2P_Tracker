@@ -20,13 +20,18 @@
                              "binding":  "DB",
                              "database_name":  "tracker-platform",
                              "database_id":  "9b53d6c4-d67e-4dce-90fb-57b64cf95653",
-                             "migrations_dir":  "d1/migrations"
+			     "migrations_dir": "d1/migrations"
                          }
                      ],
     "vars":  {
                  "ALLOWED_ORIGINS":  "*",
                  "AUTH_SOURCE":  "cloudflare-access"
              },
+    "triggers":  {
+                     "crons":  [
+                                   "*/5 * * * *"
+                               ]
+                 },
     "assets":  {
                    "directory":  "../dist",
                    "not_found_handling":  "single-page-application"
