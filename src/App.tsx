@@ -23,8 +23,6 @@ import SettingsPage from "./pages/merchant/SettingsPage";
 import CRMPage from "./pages/merchant/CRMPage";
 import P2PTrackerPage from "./pages/trading/P2PTrackerPage";
 import VaultPage from "./pages/trading/VaultPage";
-import PortfolioPage from "./pages/trading/PortfolioPage";
-import TradesPage from "./pages/trading/TradesPage";
 import OrdersPage from "./pages/trading/OrdersPage";
 import StockPage from "./pages/trading/StockPage";
 import CalendarPage from "./pages/trading/CalendarPage";
@@ -73,8 +71,6 @@ const App = () => (
               <Route path="/trading/stock" element={<StockPage />} />
               <Route path="/trading/calendar" element={<CalendarPage />} />
               <Route path="/trading/p2p" element={<P2PTrackerPage />} />
-              <Route path="/trading/portfolio" element={<PortfolioPage />} />
-              <Route path="/trading/trades" element={<TradesPage />} />
               <Route path="/crm" element={<CRMPage />} />
 
               {/* Network (combined: Directory + Invitations + Relationships + Approvals) */}

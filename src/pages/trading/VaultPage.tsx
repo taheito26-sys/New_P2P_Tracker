@@ -9,6 +9,15 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Camera, Cloud, CloudOff, Download, Upload, Trash2, RefreshCw, Pin, Eye, FileJson, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
+import {
+  findTrackerStorageKey,
+  getCurrentTrackerState,
+  loadAutoBackupFromStorage,
+  loadCloudUrlFromStorage,
+  normalizeImportedTrackerState,
+  saveAutoBackupToStorage,
+  saveCloudUrlToStorage,
+} from '@/lib/tracker-backup';
 
 /* ── IDB Vault (Ring 1) ── */
 interface Snapshot {
@@ -110,11 +119,7 @@ function downloadBlob(content: string, filename: string, mime = 'application/jso
 }
 
 function getCurrentState(): Record<string, unknown> {
-  try {
-    const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state');
-    if (sk) return JSON.parse(localStorage.getItem(sk) || '{}');
-  } catch {}
-  return {};
+  return getCurrentTrackerState(localStorage);
 }
 
 /* ── Cloud version (Ring 2) type ── */
@@ -133,11 +138,11 @@ export default function VaultPage() {
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [snapDesc, setSnapDesc] = useState('');
   const [loading, setLoading] = useState(false);
-  const [cloudUrl, setCloudUrl] = useState(() => localStorage.getItem('gas_url') || '');
+  const [cloudUrl, setCloudUrl] = useState(() => loadCloudUrlFromStorage(localStorage));
   const [cloudConnected, setCloudConnected] = useState(false);
   const [cloudVersions, setCloudVersions] = useState<CloudVersion[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
-  const [autoBackup, setAutoBackup] = useState(() => localStorage.getItem('gasAutoSave') === 'true');
+  const [autoBackup, setAutoBackup] = useState(() => loadAutoBackupFromStorage(localStorage));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -180,8 +185,8 @@ export default function VaultPage() {
     const snap = await idbGet(id);
     if (!snap?.state) { toast.error('Snapshot not found'); return; }
     try {
-      const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state');
-      if (sk) localStorage.setItem(sk, JSON.stringify(snap.state));
+      const sk = findTrackerStorageKey(localStorage);
+      localStorage.setItem(sk, JSON.stringify(snap.state));
       toast.success('✓ Restored from local snapshot');
       window.location.reload();
     } catch (e: any) {
@@ -208,13 +213,13 @@ export default function VaultPage() {
 
   const saveCloudUrl = () => {
     if (!cloudUrl.trim()) { toast.error('Paste your Web App URL first'); return; }
-    localStorage.setItem('gas_url', cloudUrl.trim());
+    saveCloudUrlToStorage(localStorage, cloudUrl.trim());
     toast.success('✓ URL saved');
   };
 
   const handleAutoBackupToggle = (v: boolean) => {
     setAutoBackup(v);
-    localStorage.setItem('gasAutoSave', String(v));
+    saveAutoBackupToStorage(localStorage, v);
     toast(v ? 'Auto-backup ON' : 'Auto-backup OFF');
   };
 
@@ -243,9 +248,10 @@ export default function VaultPage() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
+        const normalized = normalizeImportedTrackerState(data);
         if (!confirm('Import this data? It will replace your current state.')) return;
-        const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state') || 'tracker_state';
-        localStorage.setItem(sk, JSON.stringify(data));
+        const sk = findTrackerStorageKey(localStorage);
+        localStorage.setItem(sk, JSON.stringify(normalized));
         toast.success('Data imported — reloading…');
         setTimeout(() => window.location.reload(), 500);
       } catch {
@@ -258,8 +264,8 @@ export default function VaultPage() {
 
   const clearAll = () => {
     if (!confirm('⚠ Clear ALL data? This cannot be undone unless you have a backup.')) return;
-    const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state');
-    if (sk) localStorage.removeItem(sk);
+    const sk = findTrackerStorageKey(localStorage);
+    localStorage.removeItem(sk);
     toast.success('Data cleared — reloading…');
     setTimeout(() => window.location.reload(), 500);
   };
