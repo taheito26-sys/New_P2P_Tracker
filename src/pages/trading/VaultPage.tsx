@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Camera, Cloud, CloudOff, Download, Upload, Trash2, RefreshCw, Pin, Eye, FileJson, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
 import {
+  clearTrackerStorage,
   findTrackerStorageKey,
   getCurrentTrackerState,
   loadAutoBackupFromStorage,
@@ -120,6 +121,15 @@ function downloadBlob(content: string, filename: string, mime = 'application/jso
 
 function getCurrentState(): Record<string, unknown> {
   return getCurrentTrackerState(localStorage);
+}
+
+async function clearTrackerVaultDb(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const req = indexedDB.deleteDatabase('p2p_tracker_vault');
+    req.onsuccess = () => resolve();
+    req.onerror = () => resolve();
+    req.onblocked = () => resolve();
+  });
 }
 
 /* ── Cloud version (Ring 2) type ── */
@@ -262,10 +272,10 @@ export default function VaultPage() {
     e.target.value = '';
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!confirm('⚠ Clear ALL data? This cannot be undone unless you have a backup.')) return;
-    const sk = findTrackerStorageKey(localStorage);
-    localStorage.removeItem(sk);
+    clearTrackerStorage(localStorage);
+    await clearTrackerVaultDb();
     toast.success('Data cleared — reloading…');
     setTimeout(() => window.location.reload(), 500);
   };

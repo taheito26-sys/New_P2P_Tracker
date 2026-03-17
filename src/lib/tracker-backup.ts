@@ -8,6 +8,17 @@ const TRACKER_STATE_KEYS = [
 
 const TRACKER_STATE_PREFIXES = ['taheito', 'p2p_tracker'] as const;
 
+const TRACKER_CLEAR_EXACT_KEYS = [
+  'tracker_state',
+  'tracker_settings',
+  'tracker_logs',
+  'p2p_tracker_state',
+  'p2p_tracker',
+  'taheito_tracker_state',
+  'taheito_state',
+  'p2p_tracker_vault_meta',
+] as const;
+
 const IMPORT_STATE_CANDIDATE_KEYS = [
   'state',
   'trackerState',
@@ -24,6 +35,15 @@ export const CLOUD_URL_KEYS = ['gas_url', 'tracker_cloud_url', 'taheito_cloud_ur
 export const AUTO_BACKUP_KEYS = ['gasAutoSave', 'trackerAutoBackup', 'taheitoAutoBackup'] as const;
 
 export type TrackerState = Record<string, unknown>;
+
+function storageKeys(storage: Storage): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const key = storage.key(i);
+    if (key) keys.push(key);
+  }
+  return keys;
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -74,7 +94,7 @@ export function normalizeImportedTrackerState(raw: unknown): TrackerState {
 }
 
 export function findTrackerStorageKey(storage: Storage): string {
-  const existing = Object.keys(storage).find((k) => TRACKER_STATE_PREFIXES.some((prefix) => k.startsWith(prefix)) || TRACKER_STATE_KEYS.includes(k as any));
+  const existing = storageKeys(storage).find((k) => TRACKER_STATE_PREFIXES.some((prefix) => k.startsWith(prefix)) || TRACKER_STATE_KEYS.includes(k as any));
   return existing || TRACKER_STATE_KEYS[0];
 }
 
@@ -112,4 +132,25 @@ export function loadAutoBackupFromStorage(storage: Storage): boolean {
 
 export function saveAutoBackupToStorage(storage: Storage, value: boolean): void {
   for (const key of AUTO_BACKUP_KEYS) storage.setItem(key, String(value));
+}
+
+export function listTrackerKeysToClear(storage: Storage): string[] {
+  const keys = new Set<string>([
+    ...TRACKER_CLEAR_EXACT_KEYS,
+    ...CLOUD_URL_KEYS,
+    ...AUTO_BACKUP_KEYS,
+  ]);
+
+  for (const key of storageKeys(storage)) {
+    if (TRACKER_STATE_PREFIXES.some((prefix) => key.startsWith(prefix))) keys.add(key);
+    if (key.startsWith('tracker_')) keys.add(key);
+  }
+
+  return Array.from(keys);
+}
+
+export function clearTrackerStorage(storage: Storage): void {
+  for (const key of listTrackerKeysToClear(storage)) {
+    storage.removeItem(key);
+  }
 }
