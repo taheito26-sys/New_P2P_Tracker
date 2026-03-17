@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createDemoState } from '@/lib/tracker-demo-data';
 import {
   fmtU,
   fmtP,
@@ -17,6 +16,7 @@ import {
   type TradeCalcResult,
 } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
+import { loadTrackerState, saveTrackerState } from '@/lib/tracker-storage';
 import {
   Dialog,
   DialogContent,
@@ -37,15 +37,15 @@ function toInputFromTs(ts: number) {
 export default function OrdersPage() {
   const { settings } = useTheme();
 
-  const initial = useMemo(() => createDemoState({
+  const initialState = useMemo(() => loadTrackerState(localStorage, {
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
     range: settings.range,
     currency: settings.currency,
   }), []);
 
-  const [state, setState] = useState<TrackerState>(initial.state);
-  const [derived, setDerived] = useState(initial.derived);
+  const [state, setState] = useState<TrackerState>(initialState);
+  const [derived, setDerived] = useState(() => computeFIFO(initialState.batches, initialState.trades));
 
   const [saleDate, setSaleDate] = useState(nowInput());
   const [saleMode, setSaleMode] = useState<'USDT' | 'QAR'>('USDT');
@@ -73,6 +73,7 @@ export default function OrdersPage() {
   const applyState = (next: TrackerState) => {
     setState(next);
     setDerived(computeFIFO(next.batches, next.trades));
+    saveTrackerState(localStorage, next);
   };
 
   useEffect(() => {

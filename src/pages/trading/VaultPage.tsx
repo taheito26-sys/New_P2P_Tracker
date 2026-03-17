@@ -19,6 +19,7 @@ import {
   saveAutoBackupToStorage,
   saveCloudUrlToStorage,
 } from '@/lib/tracker-backup';
+import { toTradeCsv, toTradeExcelTsv } from '@/lib/tracker-storage';
 
 /* ── IDB Vault (Ring 1) ── */
 interface Snapshot {
@@ -245,10 +246,20 @@ export default function VaultPage() {
     const state = getCurrentState() as any;
     const trades = state.trades || [];
     if (!trades.length) { toast.error('No trades to export'); return; }
-    const headers = ['id', 'ts', 'amountUSDT', 'sellPriceQAR', 'feeQAR', 'note', 'voided'];
-    const rows = trades.map((t: any) => headers.map(h => JSON.stringify(t[h] ?? '')).join(','));
-    downloadBlob([headers.join(','), ...rows].join('\n'), `trades-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
+    downloadBlob(toTradeCsv(state), `trades-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
     toast.success('CSV exported');
+  };
+
+  const exportExcel = () => {
+    const state = getCurrentState() as any;
+    const trades = state.trades || [];
+    if (!trades.length) { toast.error('No trades to export'); return; }
+    downloadBlob(
+      toTradeExcelTsv(state),
+      `trades-${new Date().toISOString().slice(0, 10)}.xls`,
+      'application/vnd.ms-excel;charset=utf-8',
+    );
+    toast.success('Excel exported');
   };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -499,7 +510,7 @@ export default function VaultPage() {
               </p>
 
               <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={() => toast('Excel export — coming soon')}>
+                <Button variant="outline" size="sm" onClick={exportExcel}>
                   <FileSpreadsheet className="w-3 h-3 mr-1" /> Excel
                 </Button>
                 <Button variant="outline" size="sm" onClick={exportJSON}>
