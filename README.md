@@ -19,10 +19,11 @@ npm install
 
 2. Configure Cloudflare resources in `infra/wrangler.jsonc`:
 
-- replace `REPLACE_WITH_D1_DATABASE_ID`
+- set environment variable `D1_DATABASE_ID` to your Cloudflare D1 database UUID
 - set `vars.ALLOWED_ORIGINS` to your frontend origin(s), comma-separated
 
 > Note: `P2P_KV` is optional. If you do not bind a KV namespace, tracker snapshot endpoints still work with generated in-memory snapshots (no persisted history between requests).
+> For Cloudflare build/deploy environments, configure `D1_DATABASE_ID` in project environment variables so Wrangler can resolve the `DB` binding.
 
 3. Initialize the local database:
 
