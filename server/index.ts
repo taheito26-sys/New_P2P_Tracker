@@ -4,7 +4,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 
 type Bindings = {
   DB: D1Database;
-  P2P_KV: KVNamespace;
+  P2P_KV?: KVNamespace;
   ALLOWED_ORIGINS?: string;
 };
 
@@ -424,13 +424,22 @@ function buildTrackerSnapshot(now: number): P2PSnapshot {
   };
 }
 
-async function loadTrackerHistory(kv: KVNamespace): Promise<P2PHistoryPoint[]> {
+function trackerKv(env: Bindings): KVNamespace | null {
+  const kv = env.P2P_KV;
+  if (!kv || typeof kv.get !== 'function' || typeof kv.put !== 'function') return null;
+  return kv;
+}
+
+async function loadTrackerHistory(kv: KVNamespace | null): Promise<P2PHistoryPoint[]> {
+  if (!kv) return [];
   const history = await kv.get(TRACKER_HISTORY_KEY, 'json');
   return Array.isArray(history) ? history as P2PHistoryPoint[] : [];
 }
 
 async function persistTrackerSnapshot(env: Bindings, snapshot: P2PSnapshot): Promise<void> {
-  const history = await loadTrackerHistory(env.P2P_KV);
+  const kv = trackerKv(env);
+  if (!kv) return;
+  const history = await loadTrackerHistory(kv);
   const nextPoint: P2PHistoryPoint = {
     ts: snapshot.ts,
     sellAvg: snapshot.sellAvg,
@@ -441,14 +450,19 @@ async function persistTrackerSnapshot(env: Bindings, snapshot: P2PSnapshot): Pro
 
   const trimmedHistory = [...history, nextPoint].slice(-TRACKER_HISTORY_LIMIT);
   await Promise.all([
-    env.P2P_KV.put(TRACKER_LATEST_KEY, JSON.stringify(snapshot)),
-    env.P2P_KV.put(TRACKER_HISTORY_KEY, JSON.stringify(trimmedHistory)),
+    kv.put(TRACKER_LATEST_KEY, JSON.stringify(snapshot)),
+    kv.put(TRACKER_HISTORY_KEY, JSON.stringify(trimmedHistory)),
   ]);
 }
 
 async function ensureTrackerState(env: Bindings): Promise<{ snapshot: P2PSnapshot; history: P2PHistoryPoint[] }> {
-  const latest = await env.P2P_KV.get(TRACKER_LATEST_KEY, 'json') as P2PSnapshot | null;
-  const history = await loadTrackerHistory(env.P2P_KV);
+  const kv = trackerKv(env);
+  if (!kv) {
+    return { snapshot: buildTrackerSnapshot(Date.now()), history: [] };
+  }
+
+  const latest = await kv.get(TRACKER_LATEST_KEY, 'json') as P2PSnapshot | null;
+  const history = await loadTrackerHistory(kv);
 
   if (latest && history.length > 0) {
     return { snapshot: latest, history };
@@ -458,7 +472,7 @@ async function ensureTrackerState(env: Bindings): Promise<{ snapshot: P2PSnapsho
   await persistTrackerSnapshot(env, snapshot);
   return {
     snapshot,
-    history: await loadTrackerHistory(env.P2P_KV),
+    history: await loadTrackerHistory(kv),
   };
 }
 
@@ -1222,6 +1236,7 @@ app.onError((error, c) => c.json({ error: error.message }, 500));
 const worker = {
   fetch: app.fetch,
   scheduled: async (_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) => {
+    if (!trackerKv(env)) return;
     const snapshot = buildTrackerSnapshot(Date.now());
     await persistTrackerSnapshot(env, snapshot);
   },
