@@ -8,14 +8,14 @@
   "kv_namespaces": [
     {
       "binding": "P2P_KV",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+      "id": "00e9cb0899964d34a89b8b41376682ed"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "tracker-platform",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+      "database_id": "${D1_DATABASE_ID}"
     }
   ],
   "vars": {
