@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { auth as authApi, setAuthToken, setCompatAuth, merchant } from '@/lib/api';
+import { auth as authApi, merchant, setAuthToken } from '@/lib/api';
 import { isDemoMode, getDemoMode, DEMO_USER, DEMO_PROFILE } from '@/lib/demo-mode';
 import type { MerchantProfile } from '@/types/domain';
 
@@ -57,7 +57,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (session) {
           setUserId(session.user_id);
           setEmail(session.email);
-          setCompatAuth(session.user_id, session.email);
           await refreshProfile();
         }
       } catch {
@@ -79,7 +78,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthToken(result.token);
     setUserId(result.user_id);
     setEmail(email);
-    setCompatAuth(result.user_id, email);
     await refreshProfile();
   }, [refreshProfile]);
 
@@ -89,11 +87,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     await authApi.signup(email, password);
-  }, []);
+    const result = await authApi.login(email, password);
+    setAuthToken(result.token);
+    setUserId(result.user_id);
+    setEmail(email);
+    await refreshProfile();
+  }, [refreshProfile]);
 
   const logout = useCallback(async () => {
     if (!getDemoMode()) {
-      try { await authApi.logout(); } catch {}
+      try { await authApi.logout(); } catch {
+        // Ignore logout transport failures while clearing local state.
+      }
     }
     setAuthToken(null);
     setUserId(null);

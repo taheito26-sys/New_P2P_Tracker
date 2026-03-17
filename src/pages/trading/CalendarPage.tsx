@@ -42,7 +42,11 @@ export default function CalendarPage() {
         mData[d2].volumeQAR += rev;
         mData[d2].trades++;
         mData[d2].marginSum += Number.isFinite(c.margin) ? c.margin : 0;
-        (c.netQAR >= 0 ? mData[d2].wins++ : mData[d2].losses++);
+        if (c.netQAR >= 0) {
+          mData[d2].wins++;
+        } else {
+          mData[d2].losses++;
+        }
         mData[d2].tradeList.push({ ...tr, net: c.netQAR, margin: c.margin, avgBuy: c.avgBuyQAR, rev });
       }
     }

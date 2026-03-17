@@ -29,10 +29,11 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await signup(email, password);
-      toast.success('Account created! Check your email for verification.');
-      navigate('/auth/verify-email');
-    } catch (err: any) {
-      toast.error(err.message || 'Signup failed');
+      toast.success('Account created!');
+      navigate('/onboarding');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Signup failed';
+      toast.error(message);
     } finally {
       setLoading(false);
     }

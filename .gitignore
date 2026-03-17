@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+infra/.wrangler
+*.patch
+lint_output.txt
 
 # Editor directories and files
 .vscode/*

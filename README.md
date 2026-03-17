@@ -1,73 +1,69 @@
-# Welcome to your Lovable project
+# New P2P Tracker
 
-## Project info
+React + Vite frontend with a Cloudflare Worker API, D1-backed merchant workflow data, and KV-backed P2P tracker snapshots.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Architecture
 
-## How can I edit this code?
+- `src/`: React application, auth/session-aware UI, merchant workspace, trading pages.
+- `server/index.ts`: Hono-based Worker API for auth, merchant relationships, deals, approvals, messaging, notifications, analytics, and P2P tracker reads.
+- `infra/wrangler.jsonc`: Worker entrypoint, D1/KV bindings, cron trigger.
+- `infra/d1/migrations/`: database schema migrations.
 
-There are several ways of editing your application.
+## Local setup
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+1. Install dependencies:
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+npm install
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+2. Configure Cloudflare resources in `infra/wrangler.jsonc`:
 
-# Step 3: Install the necessary dependencies.
-npm i
+- replace `REPLACE_WITH_KV_NAMESPACE_ID`
+- replace `REPLACE_WITH_D1_DATABASE_ID`
+- set `vars.ALLOWED_ORIGINS` to your frontend origin(s), comma-separated
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+3. Initialize the local database:
+
+```sh
+npm run db:init
+wrangler d1 execute tracker-platform --local --file=./infra/d1/migrations/002_users.sql -c infra/wrangler.jsonc
+```
+
+4. Run the app:
+
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Frontend runs on `http://localhost:5000`.
+Worker API runs via Wrangler and is proxied through Vite at `/api`.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Demo mode
 
-**Use GitHub Codespaces**
+Demo mode is disabled by default. To enable local demo fallback, set:
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+VITE_ENABLE_DEMO_MODE=true
+```
 
-## What technologies are used for this project?
+## Validation
 
-This project is built with:
+```sh
+npm run build
+npm test
+npx tsc --noEmit
+npm run lint
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Deploy
 
-## How can I deploy this project?
+1. Apply D1 migrations to the target environment.
+2. Configure KV, D1, and `ALLOWED_ORIGINS`.
+3. Deploy the Worker:
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+```sh
+wrangler deploy -c infra/wrangler.jsonc
+```
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+The cron in `infra/wrangler.jsonc` triggers the Worker scheduled handler every 5 minutes to refresh KV-backed P2P snapshot history.

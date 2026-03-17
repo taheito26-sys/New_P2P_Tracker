@@ -21,9 +21,10 @@ export default function LoginPage() {
     try {
       await login(email, password);
       toast.success('Signed in successfully');
-      navigate('/merchant');
-    } catch (err: any) {
-      toast.error(err.message || 'Login failed');
+      navigate('/dashboard');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Login failed';
+      toast.error(message);
     } finally {
       setLoading(false);
     }

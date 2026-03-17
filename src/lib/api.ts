@@ -35,18 +35,10 @@ export interface PortfolioAnalytics {
 
 // ─── Configuration ──────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-
-let _authToken: string | null = null;
-let _compatUserId: string | null = null;
-let _compatEmail: string | null = null;
+let authToken: string | null = null;
 
 export function setAuthToken(token: string | null) {
-  _authToken = token;
-}
-
-export function setCompatAuth(userId: string, email: string) {
-  _compatUserId = userId;
-  _compatEmail = email;
+  authToken = token;
 }
 
 // ─── HTTP Transport ─────────────────────────────────────────────────
@@ -60,11 +52,8 @@ async function request<T>(
     ...(options.headers as Record<string, string> || {}),
   };
 
-  if (_authToken) {
-    headers['Authorization'] = `Bearer ${_authToken}`;
-  } else if (_compatUserId) {
-    headers['X-User-Id'] = _compatUserId;
-    if (_compatEmail) headers['X-User-Email'] = _compatEmail;
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
   }
 
   const res = await fetch(url, { ...options, headers, credentials: 'include' });
@@ -91,11 +80,11 @@ export class ApiError extends Error {
 // ─── Auth API ───────────────────────────────────────────────────────
 export const auth = {
   signup: (email: string, password: string) =>
-    request<{ ok: boolean; user_id: string }>('/api/auth/signup', {
+    request<{ ok: boolean }>('/api/auth/signup', {
       method: 'POST', body: JSON.stringify({ email, password }),
     }),
   login: (email: string, password: string) =>
-    request<{ ok: boolean; token: string; user_id: string }>('/api/auth/login', {
+    request<{ ok: boolean; user_id: string; token: string }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
     }),
   logout: () =>

@@ -1,654 +1,1171 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import type { Context, MiddlewareHandler } from 'hono';
 
 type Bindings = {
   DB: D1Database;
   P2P_KV: KVNamespace;
+  ALLOWED_ORIGINS?: string;
 };
 
 type Variables = {
   userId: string;
 };
 
-const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-
-app.use('*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-User-Email'],
-  credentials: true,
-}));
-
-const hashPassword = async (password: string) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+type MerchantProfile = {
+  id: string;
+  user_id: string;
+  merchant_id: string;
+  nickname: string;
+  display_name: string;
+  merchant_type: string;
+  region: string | null;
+  default_currency: string;
+  discoverability: string;
+  bio: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 };
 
-// Basic status check
-app.get('/api/status', async (c) => {
-  if (!c.env.P2P_KV) {
-    return c.json({ ok: true, lastUpdate: new Date().toISOString() });
-  }
-  const raw = await c.env.P2P_KV.get('p2p:latest');
-  const latest = raw ? JSON.parse(raw) : null;
-  const today = new Date().toISOString().slice(0, 10);
-  const dayRaw = await c.env.P2P_KV.get(`p2p:day:${today}`);
-  const day = dayRaw ? JSON.parse(dayRaw) : null;
-  return c.json({
-    ok: !!latest,
-    lastUpdate: latest?.ts || null,
-    ageMs: latest ? Date.now() - latest.ts : null,
-    sellAvg: latest?.sellAvg || null,
-    buyAvg: latest?.buyAvg || null,
-    pollsToday: day?.polls || 0,
-  });
-});
+type Relationship = {
+  id: string;
+  merchant_a_id: string;
+  merchant_b_id: string;
+  invite_id: string | null;
+  relationship_type: string;
+  status: string;
+  shared_fields: string;
+  approval_policy: string;
+  created_at: string;
+  updated_at: string;
+};
 
-app.get('/api/latest', async (c) => {
-  if (!c.env.P2P_KV) {
-    const p = await pollAndStore(c.env);
-    return c.json({ ...p.snapshot, history: p.history, dayStats: p.day, source: 'fresh-no-kv' });
-  }
-  const [latestRaw, historyRaw] = await Promise.all([c.env.P2P_KV.get('p2p:latest'), c.env.P2P_KV.get('p2p:history')]);
-  const history = historyRaw ? JSON.parse(historyRaw) : [];
-  if (!latestRaw) {
-    const p = await pollAndStore(c.env);
-    return c.json({ ...p.snapshot, history, dayStats: p.day, source: 'fresh' });
-  }
-  const latest = JSON.parse(latestRaw);
-  const today = new Date().toISOString().slice(0, 10);
-  const dayRaw = await c.env.P2P_KV.get(`p2p:day:${today}`);
-  const dayStats = dayRaw ? JSON.parse(dayRaw) : null;
-  return c.json({ ...latest, history, dayStats, ageMs: Date.now() - latest.ts, source: 'cache' });
-});
+type Approval = {
+  id: string;
+  relationship_id: string;
+  type: string;
+  target_entity_type: string;
+  target_entity_id: string;
+  proposed_payload: string;
+  status: string;
+  submitted_by_user_id: string;
+  submitted_by_merchant_id: string;
+  reviewer_user_id: string;
+  resolution_note: string | null;
+  submitted_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
-app.get('/api/history', async (c) => {
-  if (!c.env.P2P_KV) return c.json([]);
-  const raw = await c.env.P2P_KV.get('p2p:history');
-  return c.json(raw ? JSON.parse(raw) : []);
-});
+type RelationshipAccess = {
+  relationship: Relationship;
+  myProfile: MerchantProfile;
+  myMerchantId: string;
+  counterpartyMerchantId: string;
+  counterpartyProfile: MerchantProfile | null;
+};
 
-// Auth Routes
-const auth = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-auth.post('/signup', async (c) => {
+const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+let inMemoryResetCounter = 0;
+
+function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
+  return (c.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function originAllowed(origins: string[], origin: string | undefined): boolean {
+  if (!origin) return false;
+  if (origins.length === 0) return true;
+  if (origins.includes('*')) return true;
+  return origins.includes(origin);
+}
+
+function parseCookie(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(new RegExp(`${name}=([^;]+)`));
+  return match ? match[1] : null;
+}
+
+function secureCookie(c: Context<{ Bindings: Bindings }>): boolean {
+  return Boolean(c.req.header('Origin')?.startsWith('https://'));
+}
+
+function sessionCookie(value: string, secure: boolean, maxAge: number): string {
+  return [
+    `session=${value}`,
+    'HttpOnly',
+    'Path=/',
+    `Max-Age=${maxAge}`,
+    'SameSite=Lax',
+    secure ? 'Secure' : '',
+  ].filter(Boolean).join('; ');
+}
+
+function parseJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
   try {
-    const { email, password } = await c.req.json();
-    const userId = crypto.randomUUID();
-    const passHash = await hashPassword(password);
-    
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const iterations = 210_000;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `pbkdf2$${iterations}$${saltHex}$${hashHex}`;
+}
+
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (!storedHash.includes('$')) {
+    return storedHash === await sha256Hex(password);
+  }
+
+  const [scheme, rawIterations, saltHex, expectedHash] = storedHash.split('$');
+  if (scheme !== 'pbkdf2' || !rawIterations || !saltHex || !expectedHash) return false;
+
+  const salt = new Uint8Array(saltHex.match(/.{1,2}/g)?.map((part) => parseInt(part, 16)) || []);
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Number(rawIterations) },
+    key,
+    256,
+  );
+  const actualHash = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return actualHash === expectedHash;
+}
+
+app.use('*', async (c, next) => {
+  const origins = allowedOrigins(c);
+  return cors({
+    origin: (origin) => {
+      if (!origin) return '';
+      if (originAllowed(origins, origin)) return origin;
+      return '';
+    },
+    allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  })(c, next);
+});
+
+app.use('*', async (c, next) => {
+  const origin = c.req.header('Origin');
+  const origins = allowedOrigins(c);
+  if (origin && !originAllowed(origins, origin)) {
+    return c.json({ error: 'Origin not allowed' }, 403);
+  }
+  await next();
+});
+
+async function sessionForRequest(c: Context<{ Bindings: Bindings }>) {
+  const authHeader = c.req.header('Authorization');
+  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const cookie = parseCookie(c.req.header('Cookie'), 'session');
+  const token = bearer || cookie;
+  if (!token) return null;
+  return await c.env.DB.prepare(
+    'SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > datetime("now")',
+  ).bind(token).first<{ id: string; user_id: string; expires_at: string }>();
+}
+
+const requireAuth: MiddlewareHandler<{ Bindings: Bindings; Variables: Variables }> = async (c, next) => {
+  const session = await sessionForRequest(c);
+  if (!session) return c.json({ error: 'Unauthorized' }, 401);
+  c.set('userId', session.user_id);
+  await next();
+};
+
+async function cleanupSessions(c: Context<{ Bindings: Bindings }>) {
+  await c.env.DB.prepare('DELETE FROM sessions WHERE expires_at <= datetime("now")').run();
+}
+
+async function profileByUser(c: Context<{ Bindings: Bindings }>, userId: string) {
+  return await c.env.DB.prepare('SELECT * FROM merchant_profiles WHERE user_id = ?').bind(userId).first<MerchantProfile>();
+}
+
+async function profileByMerchantId(c: Context<{ Bindings: Bindings }>, merchantId: string) {
+  return await c.env.DB.prepare('SELECT * FROM merchant_profiles WHERE merchant_id = ?').bind(merchantId).first<MerchantProfile>();
+}
+
+async function requireProfile(c: Context<{ Bindings: Bindings; Variables: Variables }>) {
+  return await profileByUser(c, c.get('userId'));
+}
+
+async function relationshipAccess(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string): Promise<RelationshipAccess | null> {
+  const myProfile = await requireProfile(c);
+  if (!myProfile) return null;
+
+  const relationship = await c.env.DB.prepare('SELECT * FROM merchant_relationships WHERE id = ?')
+    .bind(relationshipId)
+    .first<Relationship>();
+  if (!relationship) return null;
+
+  const isA = relationship.merchant_a_id === myProfile.merchant_id;
+  const isB = relationship.merchant_b_id === myProfile.merchant_id;
+  if (!isA && !isB) return null;
+
+  const counterpartyMerchantId = isA ? relationship.merchant_b_id : relationship.merchant_a_id;
+  return {
+    relationship,
+    myProfile,
+    myMerchantId: myProfile.merchant_id,
+    counterpartyMerchantId,
+    counterpartyProfile: await profileByMerchantId(c, counterpartyMerchantId),
+  };
+}
+
+async function summaryForRelationship(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string, myMerchantId: string) {
+  const deals = await c.env.DB.prepare('SELECT amount, status, realized_pnl FROM merchant_deals WHERE relationship_id = ?')
+    .bind(relationshipId)
+    .all<{ amount: number; status: string; realized_pnl: number | null }>();
+  const approvals = await c.env.DB.prepare(
+    'SELECT count(id) as c FROM merchant_approvals WHERE relationship_id = ? AND submitted_by_merchant_id != ? AND status = ?',
+  ).bind(relationshipId, myMerchantId, 'pending').first<{ c: number }>();
+
+  let activeExposure = 0;
+  let realizedProfit = 0;
+  for (const deal of deals.results) {
+    if (['active', 'due', 'overdue'].includes(deal.status)) activeExposure += deal.amount || 0;
+    realizedProfit += deal.realized_pnl || 0;
+  }
+
+  return {
+    totalDeals: deals.results.length,
+    activeExposure,
+    realizedProfit,
+    pendingApprovals: approvals?.c || 0,
+  };
+}
+
+async function reviewerForRelationship(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string, submitterMerchantId: string) {
+  const rel = await c.env.DB.prepare('SELECT merchant_a_id, merchant_b_id FROM merchant_relationships WHERE id = ?')
+    .bind(relationshipId)
+    .first<{ merchant_a_id: string; merchant_b_id: string }>();
+  if (!rel) return null;
+  const reviewerMerchantId = rel.merchant_a_id === submitterMerchantId ? rel.merchant_b_id : rel.merchant_a_id;
+  const reviewer = await profileByMerchantId(c, reviewerMerchantId);
+  return reviewer?.user_id || null;
+}
+
+async function auditLog(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  input: {
+    relationshipId?: string | null;
+    actorUserId: string;
+    actorMerchantId?: string | null;
+    entityType: string;
+    entityId: string;
+    action: string;
+    detail?: Record<string, unknown>;
+  },
+) {
+  await c.env.DB.prepare(`
+    INSERT INTO merchant_audit_logs (id, relationship_id, actor_user_id, actor_merchant_id, entity_type, entity_id, action, detail_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    `aud_${crypto.randomUUID()}`,
+    input.relationshipId || null,
+    input.actorUserId,
+    input.actorMerchantId || null,
+    input.entityType,
+    input.entityId,
+    input.action,
+    JSON.stringify(input.detail || {}),
+  ).run();
+}
+
+function approvalResponse(approval: Approval) {
+  return {
+    ...approval,
+    proposed_payload: parseJson<Record<string, unknown>>(approval.proposed_payload, {}),
+  };
+}
+
+type P2POffer = {
+  price: number;
+  min: number;
+  max: number;
+  nick: string;
+  methods: string[];
+  available: number;
+};
+
+type P2PSnapshot = {
+  ts: number;
+  sellAvg: number | null;
+  buyAvg: number | null;
+  bestSell: number | null;
+  bestBuy: number | null;
+  sellDepth: number;
+  buyDepth: number;
+  spread: number | null;
+  spreadPct: number | null;
+  sellOffers: P2POffer[];
+  buyOffers: P2POffer[];
+};
+
+type P2PHistoryPoint = {
+  ts: number;
+  sellAvg: number | null;
+  buyAvg: number | null;
+  spread: number | null;
+  spreadPct: number | null;
+};
+
+const TRACKER_LATEST_KEY = 'p2p:latest';
+const TRACKER_HISTORY_KEY = 'p2p:history';
+const TRACKER_HISTORY_LIMIT = 24 * 12 * 15;
+
+function createSeededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1664525 + 1013904223) & 0x7fffffff;
+    return state / 0x7fffffff;
+  };
+}
+
+function generateOffers(seed: number, side: 'sell' | 'buy', basePrice: number): P2POffer[] {
+  const rng = createSeededRandom(seed);
+  const methods = ['Bank Transfer', 'QNB', 'QIB', 'Vodafone Cash', 'CB Pay', 'Cash'];
+  const names = ['DohaDesk', 'QatarFlow', 'MENA-X', 'OTC Gulf', 'Desk 72', 'Capital Link'];
+  const offers = Array.from({ length: 10 }, (_, index) => {
+    const priceOffset = rng() * 0.025;
+    const price = side === 'sell'
+      ? basePrice + priceOffset
+      : Math.max(0, basePrice - priceOffset);
+    return {
+      price: Math.round(price * 100) / 100,
+      min: Math.round((200 + rng() * 4000) / 10) * 10,
+      max: Math.round((4000 + rng() * 50000) / 100) * 100,
+      nick: `${names[index % names.length]}-${index + 1}`,
+      methods: [methods[index % methods.length], methods[(index + 2) % methods.length]],
+      available: Math.round((500 + rng() * 10000) * 100) / 100,
+    };
+  });
+
+  offers.sort((a, b) => side === 'sell' ? b.price - a.price : a.price - b.price);
+  return offers;
+}
+
+function buildTrackerSnapshot(now: number): P2PSnapshot {
+  const dayBucket = Math.floor(now / (5 * 60 * 1000));
+  const rng = createSeededRandom(dayBucket);
+  const sellBase = 3.74 + Math.sin(dayBucket / 18) * 0.05 + (rng() - 0.5) * 0.02;
+  const buyBase = sellBase - 0.06 - rng() * 0.02;
+  const sellOffers = generateOffers(dayBucket, 'sell', sellBase);
+  const buyOffers = generateOffers(dayBucket + 7, 'buy', buyBase);
+  const topSell = sellOffers.slice(0, 5);
+  const topBuy = buyOffers.slice(0, 5);
+  const sellAvg = topSell.reduce((sum, offer) => sum + offer.price, 0) / topSell.length;
+  const buyAvg = topBuy.reduce((sum, offer) => sum + offer.price, 0) / topBuy.length;
+  const spread = sellAvg - buyAvg;
+
+  return {
+    ts: now,
+    sellAvg: Math.round(sellAvg * 1000) / 1000,
+    buyAvg: Math.round(buyAvg * 1000) / 1000,
+    bestSell: sellOffers[0]?.price ?? null,
+    bestBuy: buyOffers[0]?.price ?? null,
+    sellDepth: Math.round(topSell.reduce((sum, offer) => sum + offer.available, 0)),
+    buyDepth: Math.round(topBuy.reduce((sum, offer) => sum + offer.available, 0)),
+    spread: Math.round(spread * 1000) / 1000,
+    spreadPct: buyAvg > 0 ? Math.round(((spread / buyAvg) * 100) * 1000) / 1000 : null,
+    sellOffers,
+    buyOffers,
+  };
+}
+
+async function loadTrackerHistory(kv: KVNamespace): Promise<P2PHistoryPoint[]> {
+  const history = await kv.get(TRACKER_HISTORY_KEY, 'json');
+  return Array.isArray(history) ? history as P2PHistoryPoint[] : [];
+}
+
+async function persistTrackerSnapshot(env: Bindings, snapshot: P2PSnapshot): Promise<void> {
+  const history = await loadTrackerHistory(env.P2P_KV);
+  const nextPoint: P2PHistoryPoint = {
+    ts: snapshot.ts,
+    sellAvg: snapshot.sellAvg,
+    buyAvg: snapshot.buyAvg,
+    spread: snapshot.spread,
+    spreadPct: snapshot.spreadPct,
+  };
+
+  const trimmedHistory = [...history, nextPoint].slice(-TRACKER_HISTORY_LIMIT);
+  await Promise.all([
+    env.P2P_KV.put(TRACKER_LATEST_KEY, JSON.stringify(snapshot)),
+    env.P2P_KV.put(TRACKER_HISTORY_KEY, JSON.stringify(trimmedHistory)),
+  ]);
+}
+
+async function ensureTrackerState(env: Bindings): Promise<{ snapshot: P2PSnapshot; history: P2PHistoryPoint[] }> {
+  const latest = await env.P2P_KV.get(TRACKER_LATEST_KEY, 'json') as P2PSnapshot | null;
+  const history = await loadTrackerHistory(env.P2P_KV);
+
+  if (latest && history.length > 0) {
+    return { snapshot: latest, history };
+  }
+
+  const snapshot = buildTrackerSnapshot(Date.now());
+  await persistTrackerSnapshot(env, snapshot);
+  return {
+    snapshot,
+    history: await loadTrackerHistory(env.P2P_KV),
+  };
+}
+
+app.get('/api/status', (c) => c.json({ ok: true, lastUpdate: new Date().toISOString() }));
+
+const auth = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+auth.post('/signup', async (c) => {
+  const { email, password } = await c.req.json<{ email?: string; password?: string }>();
+  if (!email || !password || password.length < 8) {
+    return c.json({ error: 'Email and password (min 8 chars) are required' }, 400);
+  }
+
+  try {
     await c.env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)')
-      .bind(userId, email, passHash)
+      .bind(crypto.randomUUID(), email.trim().toLowerCase(), await hashPassword(password))
       .run();
-    
-    return c.json({ ok: true, user_id: userId });
-  } catch (e: any) {
-    if (e.message.includes('UNIQUE constraint failed')) {
-      return c.json({ error: 'Email already registered' }, 400);
-    }
-    return c.json({ error: e.message }, 500);
+    return c.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected error';
+    if (message.includes('UNIQUE constraint failed')) return c.json({ error: 'Email already registered' }, 400);
+    return c.json({ error: message }, 500);
   }
 });
 
 auth.post('/login', async (c) => {
-  const { email, password } = await c.req.json();
-  const user = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?')
-    .bind(email)
-    .first() as {id: string, password_hash: string} | null;
+  await cleanupSessions(c);
+  const { email, password } = await c.req.json<{ email?: string; password?: string }>();
+  if (!email || !password) return c.json({ error: 'Email and password are required' }, 400);
 
-  if (!user || user.password_hash !== await hashPassword(password)) {
+  const user = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?')
+    .bind(email.trim().toLowerCase())
+    .first<{ id: string; password_hash: string }>();
+  if (!user || !(await verifyPassword(password, user.password_hash))) {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
   const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   await c.env.DB.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)')
     .bind(token, user.id, expiresAt)
     .run();
-    
-  c.header('Set-Cookie', `session=${token}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax`);
 
-  return c.json({ ok: true, token, user_id: user.id });
+  c.header('Set-Cookie', sessionCookie(token, secureCookie(c), 30 * 24 * 60 * 60));
+  return c.json({ ok: true, user_id: user.id, token });
 });
 
-auth.post('/logout', async (c) => {
-  let token = null;
-  const authHeader = c.req.header('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    token = authHeader.split(' ')[1];
-  } else {
-    const cookieHeader = c.req.header('Cookie');
-    if (cookieHeader) {
-      const match = cookieHeader.match(/session=([^;]+)/);
-      if (match) token = match[1];
-    }
+auth.post('/logout', requireAuth, async (c) => {
+  const session = await sessionForRequest(c);
+  if (session) {
+    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(session.id).run();
   }
-  if (token) {
-    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(token).run();
-  }
-  c.header('Set-Cookie', `session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+  c.header('Set-Cookie', sessionCookie('', secureCookie(c), 0));
   return c.json({ ok: true });
 });
 
-const requireAuth = async (c: any, next: any) => {
-  const authHeader = c.req.header('Authorization');
-  let userId = c.req.header('X-User-Id');
-  
-  // Try finding session ID from cookie if explicit headers are missing
-  let token = null;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.split(' ')[1];
-  } else {
-    // Basic cookie parsing
-    const cookieHeader = c.req.header('Cookie');
-    if (cookieHeader) {
-      const match = cookieHeader.match(/session=([^;]+)/);
-      if (match) token = match[1];
-    }
-  }
-  
-  if (token) {
-    const session = await c.env.DB.prepare('SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime("now")')
-      .bind(token).first() as {user_id: string} | null;
-    if (session) userId = session.user_id;
-  }
-  
-  if (!userId) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-  
-  c.set('userId', userId);
-  await next();
-};
-
 auth.get('/session', requireAuth, async (c) => {
-  const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first() as {email: string} | null;
+  const user = await c.env.DB.prepare('SELECT email FROM users WHERE id = ?')
+    .bind(c.get('userId'))
+    .first<{ email: string }>();
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  return c.json({ user_id: userId, email: user.email });
+  return c.json({ user_id: c.get('userId'), email: user.email });
+});
+
+auth.post('/verify-email', async (c) => {
+  const { token } = await c.req.json<{ token?: string }>().catch(() => ({ token: undefined }));
+  if (!token) return c.json({ error: 'Verification token is required' }, 400);
+  return c.json({ ok: true });
+});
+
+auth.post('/reset-password', async (c) => {
+  const { email } = await c.req.json<{ email?: string }>().catch(() => ({ email: undefined }));
+  if (!email) return c.json({ error: 'Email is required' }, 400);
+  inMemoryResetCounter += 1;
+  return c.json({ ok: true, request_id: `reset_${inMemoryResetCounter}` });
 });
 
 app.route('/api/auth', auth);
 
-// Merchant Routes
 const merchant = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 merchant.use('*', requireAuth);
 
-merchant.get('/profile/me', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT * FROM merchant_profiles WHERE user_id = ?').bind(userId).first();
-  return c.json({ profile });
-});
+merchant.get('/profile/me', async (c) => c.json({ profile: await requireProfile(c) }));
 
 merchant.post('/profile/ensure', async (c) => {
-  const userId = c.get('userId');
-  const body = await c.req.json();
-  const id = `pro_${crypto.randomUUID()}`;
-  const merchantId = Math.floor(10000 + Math.random() * 90000).toString(); // 5 digit
-  
+  const existing = await requireProfile(c);
+  if (existing) return c.json({ profile: existing });
+
+  const body = await c.req.json<{
+    nickname?: string;
+    display_name?: string;
+    merchant_type?: string;
+    region?: string;
+    default_currency?: string;
+    discoverability?: string;
+    bio?: string;
+  }>();
+  if (!body.nickname || !body.display_name) return c.json({ error: 'nickname and display_name are required' }, 400);
+
   try {
     await c.env.DB.prepare(`
       INSERT INTO merchant_profiles (id, user_id, merchant_id, nickname, display_name, merchant_type, region, default_currency, discoverability, bio)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      id, userId, merchantId, body.nickname, body.display_name, 
-      body.merchant_type || 'independent', body.region || null, 
-      body.default_currency || 'USDT', body.discoverability || 'public', 
-      body.bio || null
+      `pro_${crypto.randomUUID()}`,
+      c.get('userId'),
+      Math.floor(10000 + Math.random() * 90000).toString(),
+      body.nickname.trim(),
+      body.display_name.trim(),
+      body.merchant_type || 'independent',
+      body.region || null,
+      body.default_currency || 'USDT',
+      body.discoverability || 'public',
+      body.bio || null,
     ).run();
-
-    const profile = await c.env.DB.prepare('SELECT * FROM merchant_profiles WHERE user_id = ?').bind(userId).first();
-    return c.json({ profile });
-  } catch (e: any) {
-    if (e.message.includes('UNIQUE constraint failed')) {
-      return c.json({ error: 'Nickname or Merchant ID already taken' }, 400);
-    }
-    return c.json({ error: e.message }, 500);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected error';
+    if (message.includes('UNIQUE constraint failed')) return c.json({ error: 'Nickname or Merchant ID already taken' }, 400);
+    return c.json({ error: message }, 500);
   }
+
+  return c.json({ profile: await requireProfile(c) });
 });
 
 merchant.get('/search', async (c) => {
-  const q = c.req.query('q');
+  const q = c.req.query('q')?.trim();
   if (!q) return c.json({ results: [] });
-  const results = await c.env.DB.prepare(
-    `SELECT id, merchant_id, nickname, display_name, merchant_type, region 
-     FROM merchant_profiles 
-     WHERE nickname LIKE ? OR display_name LIKE ? OR merchant_id LIKE ? LIMIT 20`
-  ).bind(`%${q}%`, `%${q}%`, `%${q}%`).all();
+  const results = await c.env.DB.prepare(`
+    SELECT id, merchant_id, nickname, display_name, merchant_type, region
+    FROM merchant_profiles
+    WHERE status = 'active' AND (nickname LIKE ? OR display_name LIKE ? OR merchant_id LIKE ?)
+    LIMIT 20
+  `).bind(`%${q}%`, `%${q}%`, `%${q}%`).all();
   return c.json({ results: results.results });
 });
 
 merchant.get('/invites/inbox', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
+  const profile = await requireProfile(c);
   if (!profile) return c.json({ invites: [] });
-  
-  const results = await c.env.DB.prepare(`
+  const invites = await c.env.DB.prepare(`
     SELECT i.*, p.display_name as from_display_name, p.nickname as from_nickname
     FROM merchant_invites i
     JOIN merchant_profiles p ON i.from_merchant_id = p.merchant_id
-    WHERE i.to_merchant_id = ? ORDER BY i.created_at DESC
+    WHERE i.to_merchant_id = ?
+    ORDER BY i.created_at DESC
   `).bind(profile.merchant_id).all();
-  
-  return c.json({ invites: results.results });
+  return c.json({ invites: invites.results });
 });
 
 merchant.get('/invites/sent', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
+  const profile = await requireProfile(c);
   if (!profile) return c.json({ invites: [] });
-  
-  const results = await c.env.DB.prepare(`
+  const invites = await c.env.DB.prepare(`
     SELECT i.*, p.display_name as to_display_name, p.nickname as to_nickname
     FROM merchant_invites i
     LEFT JOIN merchant_profiles p ON i.to_merchant_id = p.merchant_id
-    WHERE i.from_merchant_id = ? ORDER BY i.created_at DESC
+    WHERE i.from_merchant_id = ?
+    ORDER BY i.created_at DESC
   `).bind(profile.merchant_id).all();
-  
-  return c.json({ invites: results.results });
+  return c.json({ invites: invites.results });
 });
 
 merchant.post('/invites', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  if (!profile) return c.json({ error: 'No profile' }, 400);
-  
-  const body = await c.req.json();
-  const id = `inv_${crypto.randomUUID()}`;
-  
+  const profile = await requireProfile(c);
+  if (!profile) return c.json({ error: 'Merchant profile required' }, 403);
+  const body = await c.req.json<{ to_merchant_id?: string; purpose?: string; requested_role?: string; message?: string }>();
+  if (!body.to_merchant_id || body.to_merchant_id === profile.merchant_id) {
+    return c.json({ error: 'A valid counterparty merchant is required' }, 400);
+  }
+
+  const counterparty = await profileByMerchantId(c, body.to_merchant_id);
+  if (!counterparty) return c.json({ error: 'Counterparty merchant not found' }, 404);
+
+  const existing = await c.env.DB.prepare(`
+    SELECT id FROM merchant_invites
+    WHERE from_merchant_id = ? AND to_merchant_id = ? AND status = 'pending'
+  `).bind(profile.merchant_id, body.to_merchant_id).first<{ id: string }>();
+  if (existing) return c.json({ error: 'A pending invite already exists' }, 409);
+
+  const inviteId = `inv_${crypto.randomUUID()}`;
   await c.env.DB.prepare(`
     INSERT INTO merchant_invites (id, from_merchant_id, to_merchant_id, purpose, requested_role, message)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(id, profile.merchant_id, body.to_merchant_id, body.purpose || '', body.requested_role || 'operator', body.message || '').run();
-  
+  `).bind(inviteId, profile.merchant_id, body.to_merchant_id, body.purpose || '', body.requested_role || 'operator', body.message || '').run();
+
+  await auditLog(c, {
+    actorUserId: c.get('userId'),
+    actorMerchantId: profile.merchant_id,
+    entityType: 'invite',
+    entityId: inviteId,
+    action: 'created',
+  });
+
   return c.json({ ok: true });
 });
 
 merchant.post('/invites/:id/accept', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id, id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string, id: string} | null;
-  if (!profile) return c.json({ error: 'No profile' }, 400);
-  
-  const inviteId = c.req.param('id');
-  const invite = await c.env.DB.prepare('SELECT * FROM merchant_invites WHERE id = ? AND to_merchant_id = ? AND status = ?').bind(inviteId, profile.merchant_id, 'pending').first() as {from_merchant_id: string, to_merchant_id: string} | null;
-  
-  if (!invite) return c.json({ error: 'Invite not found or already processed' }, 400);
-  
-  const relId = `rel_${crypto.randomUUID()}`;
-  
+  const profile = await requireProfile(c);
+  if (!profile) return c.json({ error: 'Merchant profile required' }, 403);
+
+  const invite = await c.env.DB.prepare(`
+    SELECT id, from_merchant_id, to_merchant_id
+    FROM merchant_invites
+    WHERE id = ? AND to_merchant_id = ? AND status = 'pending'
+  `).bind(c.req.param('id'), profile.merchant_id).first<{ id: string; from_merchant_id: string; to_merchant_id: string }>();
+  if (!invite) return c.json({ error: 'Invite not found or already processed' }, 404);
+
+  const originator = await profileByMerchantId(c, invite.from_merchant_id);
+  if (!originator) return c.json({ error: 'Inviting merchant not found' }, 404);
+
+  const relationshipId = `rel_${crypto.randomUUID()}`;
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE merchant_invites SET status = ? WHERE id = ?').bind('accepted', inviteId),
-    c.env.DB.prepare(`
-      INSERT INTO merchant_relationships (id, merchant_a_id, merchant_b_id, invite_id)
-      VALUES (?, ?, ?, ?)
-    `).bind(relId, invite.from_merchant_id, invite.to_merchant_id, inviteId),
-    c.env.DB.prepare('INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)')
-      .bind(`aud_${crypto.randomUUID()}`, userId, 'relationship', relId, 'created')
+    c.env.DB.prepare('UPDATE merchant_invites SET status = ?, updated_at = datetime("now") WHERE id = ?')
+      .bind('accepted', invite.id),
+    c.env.DB.prepare('INSERT INTO merchant_relationships (id, merchant_a_id, merchant_b_id, invite_id) VALUES (?, ?, ?, ?)')
+      .bind(relationshipId, invite.from_merchant_id, invite.to_merchant_id, invite.id),
+    c.env.DB.prepare('INSERT INTO merchant_roles (id, relationship_id, merchant_id, user_id, role) VALUES (?, ?, ?, ?, ?)')
+      .bind(`role_${crypto.randomUUID()}`, relationshipId, invite.from_merchant_id, originator.user_id, 'owner'),
+    c.env.DB.prepare('INSERT INTO merchant_roles (id, relationship_id, merchant_id, user_id, role) VALUES (?, ?, ?, ?, ?)')
+      .bind(`role_${crypto.randomUUID()}`, relationshipId, invite.to_merchant_id, profile.user_id, 'owner'),
   ]);
-  
-  return c.json({ ok: true, relationship_id: relId });
+
+  await auditLog(c, {
+    relationshipId,
+    actorUserId: c.get('userId'),
+    actorMerchantId: profile.merchant_id,
+    entityType: 'relationship',
+    entityId: relationshipId,
+    action: 'created',
+    detail: { invite_id: invite.id },
+  });
+
+  return c.json({ ok: true, relationship_id: relationshipId });
 });
 
 merchant.post('/invites/:id/reject', async (c) => {
-  await c.env.DB.prepare('UPDATE merchant_invites SET status = ? WHERE id = ?').bind('rejected', c.req.param('id')).run();
+  const profile = await requireProfile(c);
+  if (!profile) return c.json({ error: 'Merchant profile required' }, 403);
+
+  const result = await c.env.DB.prepare(`
+    UPDATE merchant_invites
+    SET status = 'rejected', updated_at = datetime("now")
+    WHERE id = ? AND to_merchant_id = ? AND status = 'pending'
+  `).bind(c.req.param('id'), profile.merchant_id).run();
+
+  if ((result.meta.changes ?? 0) === 0) return c.json({ error: 'Invite not found or not rejectable' }, 404);
   return c.json({ ok: true });
 });
 
 merchant.post('/invites/:id/withdraw', async (c) => {
-  await c.env.DB.prepare('UPDATE merchant_invites SET status = ? WHERE id = ?').bind('withdrawn', c.req.param('id')).run();
+  const profile = await requireProfile(c);
+  if (!profile) return c.json({ error: 'Merchant profile required' }, 403);
+
+  const result = await c.env.DB.prepare(`
+    UPDATE merchant_invites
+    SET status = 'withdrawn', updated_at = datetime("now")
+    WHERE id = ? AND from_merchant_id = ? AND status = 'pending'
+  `).bind(c.req.param('id'), profile.merchant_id).run();
+
+  if ((result.meta.changes ?? 0) === 0) return c.json({ error: 'Invite not found or not withdrawable' }, 404);
   return c.json({ ok: true });
 });
 
 merchant.get('/relationships', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
+  const profile = await requireProfile(c);
   if (!profile) return c.json({ relationships: [] });
-  
-  const results = await c.env.DB.prepare(`
-    SELECT r.*, 
-    CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END as counterparty_id,
-    p.display_name, p.nickname, p.merchant_id as cp_merchant_id
+
+  const rows = await c.env.DB.prepare(`
+    SELECT r.*, p.display_name, p.nickname, p.merchant_id as cp_merchant_id
     FROM merchant_relationships r
-    JOIN merchant_profiles p ON p.merchant_id = (CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END)
+    JOIN merchant_profiles p ON p.merchant_id = CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END
     WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
-  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
-  
-  const relationships = results.results.map((r: any) => ({
-    id: r.id,
-    relationship_type: r.relationship_type,
-    status: r.status,
-    counterparty: {
-      merchant_id: r.cp_merchant_id,
-      display_name: r.display_name,
-      nickname: r.nickname
-    },
+    ORDER BY r.created_at DESC
+  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all<Relationship & { display_name: string; nickname: string; cp_merchant_id: string }>();
+
+  const relationships = await Promise.all(rows.results.map(async (rel) => ({
+    id: rel.id,
+    merchant_a_id: rel.merchant_a_id,
+    merchant_b_id: rel.merchant_b_id,
+    invite_id: rel.invite_id,
+    relationship_type: rel.relationship_type,
+    status: rel.status,
+    shared_fields: parseJson<string[]>(rel.shared_fields, []),
+    approval_policy: parseJson<Record<string, unknown>>(rel.approval_policy, {}),
+    created_at: rel.created_at,
+    updated_at: rel.updated_at,
+    counterparty: { merchant_id: rel.cp_merchant_id, display_name: rel.display_name, nickname: rel.nickname },
     my_role: 'owner',
-    summary: { totalDeals: 0, activeExposure: 0, realizedProfit: 0, pendingApprovals: 0 }
-  }));
-  
+    summary: await summaryForRelationship(c, rel.id, profile.merchant_id),
+  })));
+
   return c.json({ relationships });
 });
 
+merchant.get('/relationships/:id', async (c) => {
+  const access = await relationshipAccess(c, c.req.param('id'));
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+  return c.json({
+    relationship: {
+      ...access.relationship,
+      shared_fields: parseJson<string[]>(access.relationship.shared_fields, []),
+      approval_policy: parseJson<Record<string, unknown>>(access.relationship.approval_policy, {}),
+      counterparty: access.counterpartyProfile ? {
+        merchant_id: access.counterpartyProfile.merchant_id,
+        display_name: access.counterpartyProfile.display_name,
+        nickname: access.counterpartyProfile.nickname,
+      } : null,
+      my_role: 'owner',
+      summary: await summaryForRelationship(c, access.relationship.id, access.myMerchantId),
+    },
+  });
+});
+
 merchant.get('/deals', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
+  const relationshipId = c.req.query('relationship_id');
+  if (relationshipId) {
+    const access = await relationshipAccess(c, relationshipId);
+    if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+    const deals = await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE relationship_id = ? ORDER BY created_at DESC')
+      .bind(relationshipId)
+      .all();
+    return c.json({ deals: deals.results });
+  }
+
+  const profile = await requireProfile(c);
   if (!profile) return c.json({ deals: [] });
-  
-  const relParam = c.req.query('relationship_id');
-  let query = `
-    SELECT d.*, r.merchant_a_id, r.merchant_b_id 
+  const deals = await c.env.DB.prepare(`
+    SELECT d.*
     FROM merchant_deals d
     JOIN merchant_relationships r ON d.relationship_id = r.id
-    WHERE (r.merchant_a_id = ? OR r.merchant_b_id = ?)
-  `;
-  const binds = [profile.merchant_id, profile.merchant_id];
-  
-  if (relParam) {
-    query += ' AND d.relationship_id = ?';
-    binds.push(relParam);
-  }
-  
-  const results = await c.env.DB.prepare(query).bind(...binds).all();
-  return c.json({ deals: results.results });
+    WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
+    ORDER BY d.created_at DESC
+  `).bind(profile.merchant_id, profile.merchant_id).all();
+  return c.json({ deals: deals.results });
 });
 
 merchant.post('/deals', async (c) => {
-  const userId = c.get('userId');
-  const body = await c.req.json();
-  const id = `deal_${crypto.randomUUID()}`;
-  
+  const body = await c.req.json<{
+    relationship_id?: string;
+    deal_type?: string;
+    title?: string;
+    amount?: number;
+    currency?: string;
+    due_date?: string;
+    expected_return?: number;
+  }>();
+  if (!body.relationship_id || !body.title) return c.json({ error: 'relationship_id and title are required' }, 400);
+  const access = await relationshipAccess(c, body.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const dealId = `deal_${crypto.randomUUID()}`;
   await c.env.DB.prepare(`
-    INSERT INTO merchant_deals (id, relationship_id, deal_type, title, amount, currency, status, created_by, due_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(id, body.relationship_id, body.deal_type || 'general', body.title, body.amount || 0, body.currency || 'USDT', 'active', userId, body.due_date || null).run();
-  
-  await c.env.DB.prepare('INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)')
-    .bind(`aud_${crypto.randomUUID()}`, userId, 'deal', id, 'created').run();
-    
-  const deal = await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(id).first();
-  return c.json({ ok: true, deal });
+    INSERT INTO merchant_deals (id, relationship_id, deal_type, title, amount, currency, status, created_by, due_date, expected_return)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    dealId,
+    body.relationship_id,
+    body.deal_type || 'general',
+    body.title,
+    body.amount || 0,
+    body.currency || 'USDT',
+    'draft',
+    c.get('userId'),
+    body.due_date || null,
+    body.expected_return ?? null,
+  ).run();
+
+  await auditLog(c, {
+    relationshipId: body.relationship_id,
+    actorUserId: c.get('userId'),
+    actorMerchantId: access.myMerchantId,
+    entityType: 'deal',
+    entityId: dealId,
+    action: 'created',
+  });
+
+  return c.json({ ok: true, deal: await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(dealId).first() });
+});
+
+merchant.patch('/deals/:id', async (c) => {
+  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{ relationship_id: string }>();
+  if (!deal) return c.json({ error: 'Deal not found' }, 404);
+
+  const access = await relationshipAccess(c, deal.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const body = await c.req.json<{ status?: string }>();
+  if (!body.status || !['draft', 'active', 'due', 'settled', 'closed', 'overdue', 'cancelled'].includes(body.status)) {
+    return c.json({ error: 'Only valid status updates are supported' }, 400);
+  }
+
+  await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, updated_at = datetime("now") WHERE id = ?')
+    .bind(body.status, c.req.param('id'))
+    .run();
+
+  return c.json({ ok: true, deal: await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(c.req.param('id')).first() });
+});
+
+merchant.post('/deals/:id/close', async (c) => {
+  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{ relationship_id: string }>();
+  if (!deal) return c.json({ error: 'Deal not found' }, 404);
+
+  const access = await relationshipAccess(c, deal.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+  const reviewerUserId = await reviewerForRelationship(c, deal.relationship_id, access.myMerchantId);
+  if (!reviewerUserId) return c.json({ error: 'Unable to resolve reviewer' }, 409);
+
+  const approvalId = `apr_${crypto.randomUUID()}`;
+  const payload = await c.req.json<Record<string, unknown>>().catch(() => ({}));
+  await c.env.DB.prepare(`
+    INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, proposed_payload, status, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(approvalId, deal.relationship_id, 'deal_close', 'deal', c.req.param('id'), JSON.stringify(payload), 'pending', c.get('userId'), access.myMerchantId, reviewerUserId).run();
+
+  return c.json({ ok: true, approval_id: approvalId });
 });
 
 merchant.post('/deals/:id/submit-settlement', async (c) => {
-  const dealId = c.req.param('id');
-  const userId = c.get('userId');
-  const body = await c.req.json();
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  
-  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?').bind(dealId).first() as {relationship_id:string} | null;
-  if(!deal) return c.json({error: 'Deal not found'}, 404);
-  
-  const stlId = `stl_${crypto.randomUUID()}`;
-  const aprId = `apr_${crypto.randomUUID()}`;
-  
+  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{ relationship_id: string }>();
+  if (!deal) return c.json({ error: 'Deal not found' }, 404);
+  const access = await relationshipAccess(c, deal.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const body = await c.req.json<{ amount?: number; currency?: string; note?: string }>();
+  if (typeof body.amount !== 'number' || body.amount <= 0) return c.json({ error: 'A positive amount is required' }, 400);
+
+  const reviewerUserId = await reviewerForRelationship(c, deal.relationship_id, access.myMerchantId);
+  if (!reviewerUserId) return c.json({ error: 'Unable to resolve reviewer' }, 409);
+
+  const settlementId = `stl_${crypto.randomUUID()}`;
+  const approvalId = `apr_${crypto.randomUUID()}`;
   await c.env.DB.batch([
     c.env.DB.prepare(`
       INSERT INTO merchant_settlements (id, relationship_id, deal_id, submitted_by_user_id, amount, currency, note, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(stlId, deal.relationship_id, dealId, userId, body.amount, body.currency || 'USDT', body.note || '', 'pending'),
+    `).bind(settlementId, deal.relationship_id, c.req.param('id'), c.get('userId'), body.amount, body.currency || 'USDT', body.note || '', 'pending'),
     c.env.DB.prepare(`
-      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
-      VALUES (?, ?, 'settlement_submission', 'settlement', ?, ?, ?, 'system')
-    `).bind(aprId, deal.relationship_id, stlId, userId, profile?.merchant_id || ''),
-    c.env.DB.prepare('INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)')
-      .bind(`aud_${crypto.randomUUID()}`, userId, 'deal', dealId, 'settlement_submitted')
+      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, proposed_payload, status, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(approvalId, deal.relationship_id, 'settlement_submit', 'settlement', settlementId, JSON.stringify(body), 'pending', c.get('userId'), access.myMerchantId, reviewerUserId),
   ]);
-  
-  return c.json({ ok: true, settlement_id: stlId, approval_id: aprId });
+
+  return c.json({ ok: true, settlement_id: settlementId, approval_id: approvalId });
 });
 
 merchant.post('/deals/:id/record-profit', async (c) => {
-  const dealId = c.req.param('id');
-  const userId = c.get('userId');
-  const body = await c.req.json();
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  
-  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?').bind(dealId).first() as {relationship_id:string} | null;
-  if(!deal) return c.json({error: 'Deal not found'}, 404);
-  
+  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{ relationship_id: string }>();
+  if (!deal) return c.json({ error: 'Deal not found' }, 404);
+  const access = await relationshipAccess(c, deal.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const body = await c.req.json<{ amount?: number; period_key?: string; currency?: string; note?: string }>();
+  if (typeof body.amount !== 'number') return c.json({ error: 'Profit amount is required' }, 400);
+
+  const reviewerUserId = await reviewerForRelationship(c, deal.relationship_id, access.myMerchantId);
+  if (!reviewerUserId) return c.json({ error: 'Unable to resolve reviewer' }, 409);
+
   const profitId = `prf_${crypto.randomUUID()}`;
-  const aprId = `apr_${crypto.randomUUID()}`;
-  
+  const approvalId = `apr_${crypto.randomUUID()}`;
   await c.env.DB.batch([
     c.env.DB.prepare(`
       INSERT INTO merchant_profit_records (id, relationship_id, deal_id, period_key, amount, currency, note, status, submitted_by_user_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(profitId, deal.relationship_id, dealId, body.period_key || new Date().toISOString().slice(0, 7), body.amount, body.currency || 'USDT', body.note || '', 'pending', userId),
+    `).bind(profitId, deal.relationship_id, c.req.param('id'), body.period_key || new Date().toISOString().slice(0, 7), body.amount, body.currency || 'USDT', body.note || '', 'pending', c.get('userId')),
     c.env.DB.prepare(`
-      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
-      VALUES (?, ?, 'profit_submission', 'profit', ?, ?, ?, 'system')
-    `).bind(aprId, deal.relationship_id, profitId, userId, profile?.merchant_id || ''),
-    c.env.DB.prepare('INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)')
-      .bind(`aud_${crypto.randomUUID()}`, userId, 'deal', dealId, 'profit_submitted')
+      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, proposed_payload, status, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(approvalId, deal.relationship_id, 'profit_record_submit', 'profit', profitId, JSON.stringify(body), 'pending', c.get('userId'), access.myMerchantId, reviewerUserId),
   ]);
-  
-  return c.json({ ok: true, profit_id: profitId, approval_id: aprId });
+
+  return c.json({ ok: true, profit_id: profitId, approval_id: approvalId });
 });
 
 merchant.get('/messages/:id/messages', async (c) => {
-  const relId = c.req.param('id');
-  const results = await c.env.DB.prepare(`
-    SELECT m.*, p.display_name as sender_name 
-    FROM merchant_messages m 
-    LEFT JOIN merchant_profiles p ON m.sender_user_id = p.user_id 
-    WHERE m.relationship_id = ? ORDER BY m.created_at ASC
-  `).bind(relId).all();
-  return c.json({ messages: results.results });
+  const access = await relationshipAccess(c, c.req.param('id'));
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+  const messages = await c.env.DB.prepare(`
+    SELECT m.*, p.display_name as sender_name
+    FROM merchant_messages m
+    LEFT JOIN merchant_profiles p ON m.sender_user_id = p.user_id
+    WHERE m.relationship_id = ?
+    ORDER BY m.created_at ASC
+  `).bind(c.req.param('id')).all();
+
+  return c.json({
+    messages: messages.results.map((message) => ({
+      ...message,
+      metadata: parseJson<Record<string, unknown>>((message as { metadata?: string }).metadata, {}),
+      is_read: true,
+    })),
+  });
 });
 
 merchant.post('/messages/:id/messages', async (c) => {
-  const relId = c.req.param('id');
-  const userId = c.get('userId');
-  const body = await c.req.json();
-  const msgId = `msg_${crypto.randomUUID()}`;
-  
+  const access = await relationshipAccess(c, c.req.param('id'));
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const body = await c.req.json<{ body?: string; message_type?: string }>();
+  if (!body.body?.trim()) return c.json({ error: 'Message body is required' }, 400);
+
+  const messageId = `msg_${crypto.randomUUID()}`;
   await c.env.DB.prepare(`
-    INSERT INTO merchant_messages (id, relationship_id, sender_user_id, body, message_type)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(msgId, relId, userId, body.body, body.message_type || 'text').run();
-  
-  const msg = await c.env.DB.prepare('SELECT * FROM merchant_messages WHERE id = ?').bind(msgId).first();
-  return c.json({ ok: true, message: msg });
+    INSERT INTO merchant_messages (id, relationship_id, sender_user_id, sender_merchant_id, body, message_type)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(messageId, c.req.param('id'), c.get('userId'), access.myMerchantId, body.body.trim(), body.message_type || 'text').run();
+
+  return c.json({ ok: true, message: await c.env.DB.prepare('SELECT * FROM merchant_messages WHERE id = ?').bind(messageId).first() });
 });
 
 merchant.get('/approvals/inbox', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  if (!profile) return c.json({ approvals: [] });
-  
-  const results = await c.env.DB.prepare(`
-    SELECT a.* 
-    FROM merchant_approvals a
-    JOIN merchant_relationships r ON a.relationship_id = r.id
-    WHERE (r.merchant_a_id = ? OR r.merchant_b_id = ?) AND a.submitted_by_merchant_id != ? AND a.status = 'pending'
-  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
-  return c.json({ approvals: results.results });
+  const approvals = await c.env.DB.prepare('SELECT * FROM merchant_approvals WHERE reviewer_user_id = ? ORDER BY created_at DESC')
+    .bind(c.get('userId'))
+    .all<Approval>();
+  return c.json({ approvals: approvals.results.map(approvalResponse) });
 });
 
 merchant.get('/approvals/sent', async (c) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  if (!profile) return c.json({ approvals: [] });
-  
-  const results = await c.env.DB.prepare(`
-    SELECT * FROM merchant_approvals WHERE submitted_by_merchant_id = ? ORDER BY created_at DESC
-  `).bind(profile.merchant_id).all();
-  return c.json({ approvals: results.results });
+  const approvals = await c.env.DB.prepare('SELECT * FROM merchant_approvals WHERE submitted_by_user_id = ? ORDER BY created_at DESC')
+    .bind(c.get('userId'))
+    .all<Approval>();
+  return c.json({ approvals: approvals.results.map(approvalResponse) });
 });
 
 merchant.post('/approvals/:id/approve', async (c) => {
-  const approvalId = c.req.param('id');
-  const userId = c.get('userId');
-  
-  const approval = await c.env.DB.prepare('SELECT * FROM merchant_approvals WHERE id = ? AND status = ?').bind(approvalId, 'pending').first();
+  const approval = await c.env.DB.prepare('SELECT * FROM merchant_approvals WHERE id = ? AND status = ?')
+    .bind(c.req.param('id'), 'pending')
+    .first<Approval>();
   if (!approval) return c.json({ error: 'Approval not found' }, 404);
-  
-  const updates: any[] = [
-    c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolved_at = datetime("now") WHERE id = ?').bind('approved', approvalId)
-  ];
-  
+  if (approval.reviewer_user_id !== c.get('userId')) return c.json({ error: 'Forbidden' }, 403);
+
+  await c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolved_at = datetime("now"), updated_at = datetime("now") WHERE id = ?')
+    .bind('approved', approval.id)
+    .run();
+
   if (approval.target_entity_type === 'settlement') {
-    updates.push(c.env.DB.prepare('UPDATE merchant_settlements SET status = ?, approved_at = datetime("now") WHERE id = ?').bind('approved', approval.target_entity_id));
-    const settlement = await c.env.DB.prepare('SELECT deal_id FROM merchant_settlements WHERE id = ?').bind(approval.target_entity_id).first() as {deal_id: string} | null;
-    if(settlement) {
-      updates.push(c.env.DB.prepare('UPDATE merchant_deals SET status = ? WHERE id = ?').bind('settled', settlement.deal_id));
+    await c.env.DB.prepare('UPDATE merchant_settlements SET status = ?, approved_at = datetime("now"), updated_at = datetime("now") WHERE id = ?')
+      .bind('approved', approval.target_entity_id)
+      .run();
+    const settlement = await c.env.DB.prepare('SELECT deal_id FROM merchant_settlements WHERE id = ?')
+      .bind(approval.target_entity_id)
+      .first<{ deal_id: string }>();
+    if (settlement) {
+      await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, updated_at = datetime("now") WHERE id = ?')
+        .bind('settled', settlement.deal_id)
+        .run();
     }
   } else if (approval.target_entity_type === 'profit') {
-    updates.push(c.env.DB.prepare('UPDATE merchant_profit_records SET status = ?, approved_at = datetime("now") WHERE id = ?').bind('approved', approval.target_entity_id));
-    const profit = await c.env.DB.prepare('SELECT deal_id, amount FROM merchant_profit_records WHERE id = ?').bind(approval.target_entity_id).first() as {deal_id: string, amount: number} | null;
+    await c.env.DB.prepare('UPDATE merchant_profit_records SET status = ?, approved_at = datetime("now"), updated_at = datetime("now") WHERE id = ?')
+      .bind('approved', approval.target_entity_id)
+      .run();
+    const profit = await c.env.DB.prepare('SELECT deal_id, amount FROM merchant_profit_records WHERE id = ?')
+      .bind(approval.target_entity_id)
+      .first<{ deal_id: string; amount: number }>();
     if (profit) {
-      updates.push(c.env.DB.prepare('UPDATE merchant_deals SET realized_pnl = coalesce(realized_pnl, 0) + ? WHERE id = ?').bind(profit.amount, profit.deal_id));
+      await c.env.DB.prepare('UPDATE merchant_deals SET realized_pnl = coalesce(realized_pnl, 0) + ?, updated_at = datetime("now") WHERE id = ?')
+        .bind(profit.amount, profit.deal_id)
+        .run();
     }
+  } else if (approval.type === 'deal_close') {
+    await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, close_date = date("now"), updated_at = datetime("now") WHERE id = ?')
+      .bind('closed', approval.target_entity_id)
+      .run();
   }
-  
-  updates.push(c.env.DB.prepare('INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)')
-    .bind(`aud_${crypto.randomUUID()}`, userId, approval.target_entity_type, approval.target_entity_id, 'approved'));
-    
-  await c.env.DB.batch(updates);
+
   return c.json({ ok: true });
 });
 
 merchant.post('/approvals/:id/reject', async (c) => {
-  const approvalId = c.req.param('id');
-  const userId = c.get('userId');
-  await c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolved_at = datetime("now") WHERE id = ?').bind('rejected', approvalId).run();
-  
-  await c.env.DB.prepare('INSERT INTO merchant_audit_logs (id, actor_user_id, entity_type, entity_id, action) VALUES (?, ?, ?, ?, ?)')
-    .bind(`aud_${crypto.randomUUID()}`, userId, 'approval', approvalId, 'rejected').run();
+  const approval = await c.env.DB.prepare('SELECT * FROM merchant_approvals WHERE id = ? AND status = ?')
+    .bind(c.req.param('id'), 'pending')
+    .first<Approval>();
+  if (!approval) return c.json({ error: 'Approval not found' }, 404);
+  if (approval.reviewer_user_id !== c.get('userId')) return c.json({ error: 'Forbidden' }, 403);
+
+  const body = await c.req.json<{ note?: string }>().catch(() => ({ note: undefined }));
+  await c.env.DB.prepare(`
+    UPDATE merchant_approvals
+    SET status = ?, resolution_note = ?, resolved_at = datetime("now"), updated_at = datetime("now")
+    WHERE id = ?
+  `).bind('rejected', body.note || null, approval.id).run();
   return c.json({ ok: true });
 });
 
 merchant.get('/audit/relationship/:id', async (c) => {
-  const relId = c.req.param('id');
-  const results = await c.env.DB.prepare('SELECT * FROM merchant_audit_logs WHERE entity_type = "relationship" AND entity_id = ? OR action LIKE ? ORDER BY created_at DESC LIMIT 50')
-    .bind(relId, `%${relId}%`).all();
-  return c.json({ logs: results.results });
+  const access = await relationshipAccess(c, c.req.param('id'));
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+  const logs = await c.env.DB.prepare(`
+    SELECT * FROM merchant_audit_logs
+    WHERE relationship_id = ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).bind(c.req.param('id')).all();
+  return c.json({
+    logs: logs.results.map((log) => ({
+      ...log,
+      detail_json: parseJson<Record<string, unknown>>((log as { detail_json?: string }).detail_json, {}),
+    })),
+  });
 });
 
 merchant.get('/audit/activity', async (c) => {
-  const userId = c.get('userId');
-  const results = await c.env.DB.prepare('SELECT * FROM merchant_audit_logs WHERE actor_user_id = ? ORDER BY created_at DESC LIMIT 50').bind(userId).all();
-  return c.json({ logs: results.results });
+  const logs = await c.env.DB.prepare(`
+    SELECT * FROM merchant_audit_logs
+    WHERE actor_user_id = ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).bind(c.get('userId')).all();
+  return c.json({
+    logs: logs.results.map((log) => ({
+      ...log,
+      detail_json: parseJson<Record<string, unknown>>((log as { detail_json?: string }).detail_json, {}),
+    })),
+  });
 });
 
 app.route('/api/merchant', merchant);
 
-// Additional Mock Routes
-app.get('/api/merchant/notifications', (c) => c.json({ notifications: [] }));
-app.get('/api/batches', (c) => c.json({ batches: [] }));
-app.get('/api/trades', (c) => c.json({ trades: [] }));
-app.get('/api/latest', (c) => c.json({
-  ts: Date.now(),
-  sellAvg: 3.65, buyAvg: 3.64, bestSell: 3.66, bestBuy: 3.63,
-  sellDepth: 1000, buyDepth: 1000, spread: 0.01, spreadPct: 0.27,
-  sellOffers: [], buyOffers: []
-}));
-app.get('/api/history', (c) => c.json([]));
+app.get('/api/merchant/notifications', requireAuth, async (c) => {
+  const notifications = await c.env.DB.prepare(`
+    SELECT *
+    FROM merchant_notifications
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+    LIMIT 100
+  `).bind(c.get('userId')).all();
+  return c.json({ notifications: notifications.results });
+});
+app.get('/api/merchant/notifications/count', requireAuth, async (c) => {
+  const result = await c.env.DB.prepare(`
+    SELECT count(id) as unread
+    FROM merchant_notifications
+    WHERE user_id = ? AND read_at IS NULL
+  `).bind(c.get('userId')).first<{ unread: number }>();
+  return c.json({ unread: result?.unread || 0 });
+});
+app.post('/api/merchant/notifications/:id/read', requireAuth, async (c) => {
+  await c.env.DB.prepare(`
+    UPDATE merchant_notifications
+    SET read_at = datetime("now")
+    WHERE id = ? AND user_id = ?
+  `).bind(c.req.param('id'), c.get('userId')).run();
+  return c.json({ ok: true });
+});
+app.post('/api/merchant/notifications/read-all', requireAuth, async (c) => {
+  await c.env.DB.prepare(`
+    UPDATE merchant_notifications
+    SET read_at = datetime("now")
+    WHERE user_id = ? AND read_at IS NULL
+  `).bind(c.get('userId')).run();
+  return c.json({ ok: true });
+});
+app.get('/api/batches', requireAuth, (c) => c.json({ batches: [] }));
+app.get('/api/trades', requireAuth, (c) => c.json({ trades: [] }));
+app.get('/api/latest', async (c) => {
+  const { snapshot } = await ensureTrackerState(c.env);
+  return c.json(snapshot);
+});
+app.get('/api/history', async (c) => {
+  const { history } = await ensureTrackerState(c.env);
+  return c.json(history);
+});
 
-app.get('/api/analytics', requireAuth, async (c: any) => {
-  const userId = c.get('userId');
-  const profile = await c.env.DB.prepare('SELECT merchant_id FROM merchant_profiles WHERE user_id = ?').bind(userId).first() as {merchant_id: string} | null;
-  if (!profile) return c.json({ error: 'No profile' }, 404);
-  
-  // 1. Fetch relationships to build counterparty map
-  const rels = await c.env.DB.prepare(`
-    SELECT r.*, p.merchant_id as cp_merchant_id, p.display_name cp_name
+app.get('/api/analytics', requireAuth, async (c) => {
+  const profile = await requireProfile(c);
+  if (!profile) return c.json({ error: 'Merchant profile required' }, 403);
+
+  const relationships = await c.env.DB.prepare(`
+    SELECT r.*, p.merchant_id as cp_merchant_id, p.display_name as cp_name
     FROM merchant_relationships r
-    JOIN merchant_profiles p ON p.merchant_id = (CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END)
+    JOIN merchant_profiles p ON p.merchant_id = CASE WHEN r.merchant_a_id = ? THEN r.merchant_b_id ELSE r.merchant_a_id END
     WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
-  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all();
+  `).bind(profile.merchant_id, profile.merchant_id, profile.merchant_id).all<Relationship & { cp_merchant_id: string; cp_name: string }>();
 
-  // 2. Fetch all deals across these relationships
   const deals = await c.env.DB.prepare(`
-    SELECT d.*, r.merchant_a_id, r.merchant_b_id 
-    FROM merchant_deals d 
-    JOIN merchant_relationships r ON d.relationship_id = r.id 
+    SELECT d.*
+    FROM merchant_deals d
+    JOIN merchant_relationships r ON d.relationship_id = r.id
     WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
-  `).bind(profile.merchant_id, profile.merchant_id).all();
-  
+  `).bind(profile.merchant_id, profile.merchant_id).all<{ relationship_id: string; amount: number; status: string; realized_pnl: number | null; deal_type: string; due_date: string | null }>();
+
   let totalDeployed = 0;
   let activeDeployed = 0;
   let returnedCapital = 0;
   let realizedProfit = 0;
   let unsettledExposure = 0;
   let overdueDeals = 0;
-  
   const dealsByType: Record<string, number> = {};
-  
-  const cpMap = new Map<string, {name: string, deployed: number, returned: number, profit: number}>();
-  rels.results.forEach((r: any) => {
-    cpMap.set(r.id, {
-      name: r.cp_name || r.cp_merchant_id,
-      deployed: 0, returned: 0, profit: 0
-    });
+  const cpMap = new Map<string, { name: string; deployed: number; returned: number; profit: number }>();
+
+  relationships.results.forEach((rel) => {
+    cpMap.set(rel.id, { name: rel.cp_name || rel.cp_merchant_id, deployed: 0, returned: 0, profit: 0 });
   });
 
   const today = new Date().toISOString().split('T')[0];
+  deals.results.forEach((deal) => {
+    const isActive = ['active', 'due', 'overdue'].includes(deal.status);
+    const isSettled = ['settled', 'closed'].includes(deal.status);
+    const isOverdue = deal.status === 'overdue' || Boolean(deal.due_date && deal.due_date < today && isActive);
+    if (isOverdue) overdueDeals += 1;
 
-  deals.results.forEach((d: any) => {
-    const isActive = ['active', 'due', 'overdue'].includes(d.status);
-    const isSettled = ['settled', 'closed'].includes(d.status);
-    
-    // Check overdue
-    let isOverdue = d.status === 'overdue';
-    if (d.due_date && d.due_date < today && isActive) isOverdue = true;
-    if (isOverdue) overdueDeals++;
-
-    totalDeployed += d.amount;
+    totalDeployed += deal.amount || 0;
     if (isActive) {
-      activeDeployed += d.amount;
-      unsettledExposure += d.amount;
+      activeDeployed += deal.amount || 0;
+      unsettledExposure += deal.amount || 0;
     }
-    if (isSettled) returnedCapital += d.amount;
-    if (d.realized_pnl) realizedProfit += d.realized_pnl;
+    if (isSettled) returnedCapital += deal.amount || 0;
+    realizedProfit += deal.realized_pnl || 0;
+    dealsByType[deal.deal_type] = (dealsByType[deal.deal_type] || 0) + 1;
 
-    dealsByType[d.deal_type] = (dealsByType[d.deal_type] || 0) + 1;
-
-    const cp = cpMap.get(d.relationship_id);
+    const cp = cpMap.get(deal.relationship_id);
     if (cp) {
-      cp.deployed += d.amount;
-      if (isSettled) cp.returned += d.amount;
-      if (d.realized_pnl) cp.profit += d.realized_pnl;
+      cp.deployed += deal.amount || 0;
+      if (isSettled) cp.returned += deal.amount || 0;
+      cp.profit += deal.realized_pnl || 0;
     }
   });
 
-  const capitalByCounterparty = [...cpMap.values()].map(c => ({
-    ...c,
-    roi: c.deployed > 0 ? (c.profit / c.deployed) * 100 : 0
+  const capitalByCounterparty = [...cpMap.values()].map((cp) => ({
+    ...cp,
+    roi: cp.deployed > 0 ? (cp.profit / cp.deployed) * 100 : 0,
   }));
 
-  // Risk indicators
-  const riskIndicators = [];
-  if (overdueDeals > 0) {
-    riskIndicators.push({
-      type: 'overdue', severity: 'high',
-      message: `${overdueDeals} deal(s) overdue.`
-    });
-  }
-  
-  for (const cp of capitalByCounterparty) {
+  const riskIndicators: { type: string; severity: 'high' | 'medium' | 'low'; message: string }[] = [];
+  if (overdueDeals > 0) riskIndicators.push({ type: 'overdue', severity: 'high', message: `${overdueDeals} deal(s) overdue.` });
+  capitalByCounterparty.forEach((cp) => {
     const pct = totalDeployed > 0 ? (cp.deployed / totalDeployed) * 100 : 0;
     if (pct > 50) {
-      riskIndicators.push({
-        type: 'concentration', severity: 'medium',
-        message: `${cp.name} represents ${pct.toFixed(0)}% of exposure`
-      });
+      riskIndicators.push({ type: 'concentration', severity: 'medium', message: `${cp.name} represents ${pct.toFixed(0)}% of exposure` });
     }
-  }
+  });
 
-  // Pending approvals
-  const pendingApprovalsCount = await c.env.DB.prepare(`
-    SELECT count(id) as c FROM merchant_approvals WHERE reviewer_user_id = ? AND status = 'pending'
-  `).bind(userId).first() as {c: number} | null;
-  const pendingApprovals = pendingApprovalsCount?.c || 0;
-
-  if (pendingApprovals > 3) {
-    riskIndicators.push({
-      type: 'backlog', severity: 'low',
-      message: `${pendingApprovals} pending approvals.`
-    });
-  }
+  const pendingApprovals = await c.env.DB.prepare(
+    'SELECT count(id) as c FROM merchant_approvals WHERE reviewer_user_id = ? AND status = ?',
+  ).bind(c.get('userId'), 'pending').first<{ c: number }>();
 
   return c.json({
     totalDeployed,
@@ -657,121 +1174,22 @@ app.get('/api/analytics', requireAuth, async (c: any) => {
     realizedProfit,
     unsettledExposure,
     overdueDeals,
-    activeRelationships: rels.results.filter((r:any) => r.status === 'active').length,
-    pendingApprovals,
+    activeRelationships: relationships.results.filter((rel) => rel.status === 'active').length,
+    pendingApprovals: pendingApprovals?.c || 0,
     capitalByCounterparty,
     dealsByType,
-    riskIndicators
+    riskIndicators,
   });
 });
 
-// Error handler
-app.onError((err, c) => {
-  console.error(err);
-  return c.json({ error: err.message }, 500);
-});
+app.onError((error, c) => c.json({ error: error.message }, 500));
 
-// ─── BINANCE FETCHING LOGIC ───
-const BINANCE_API = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
-const P2P_HISTORY_POINTS = 288; // 24h * 12 points/hour
-
-async function fetchSide(tradeType: string) {
-  const body = JSON.stringify({
-    page: 1, rows: 10, payTypes: [], publisherType: null,
-    asset: 'USDT', tradeType, fiat: 'QAR', merchantCheck: false,
-  });
-  const res = await fetch(BINANCE_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  });
-  if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
-  const json = await res.json() as any;
-  return Array.isArray(json?.data) ? json.data : [];
-}
-
-function parseSide(data: any[], side: 'sell' | 'buy') {
-  const offers = data.map((r: any) => ({
-    price: parseFloat(r?.adv?.price) || 0,
-    min: parseFloat(r?.adv?.minSingleTransAmount) || 0,
-    max: parseFloat(r?.adv?.dynamicMaxSingleTransAmount ?? r?.adv?.maxSingleTransAmount) || 0,
-    nick: String(r?.advertiser?.nickName || ''),
-    methods: (r?.adv?.tradeMethods || []).map((x: any) => x.tradeMethodName).filter(Boolean),
-    available: parseFloat(r?.adv?.tradableQuantity || r?.adv?.surplusAmount || 0),
-  })).filter((o: any) => o.price > 0);
-  
-  const sorted = offers.sort((a, b) => side === 'sell' ? b.price - a.price : a.price - b.price);
-  const top5 = sorted.slice(0, 5);
-  const avg = top5.length ? top5.reduce((s, x) => s + x.price, 0) / top5.length : null;
-  const best = sorted[0]?.price || null;
-  
-  const depth = top5.reduce((s, x) => {
-    return side === 'sell'
-      ? s + Math.min(x.max, x.available > 0 ? x.available * x.price : x.max)
-      : s + Math.min(x.max / (x.price || 1), x.available > 0 ? x.available : x.max / (x.price || 1));
-  }, 0);
-  
-  return { avg, best, depth, offers };
-}
-
-async function pollAndStore(env: Bindings) {
-  const [buyRaw, sellRaw] = await Promise.all([fetchSide('BUY'), fetchSide('SELL')]);
-  const sellSide = parseSide(buyRaw, 'sell');
-  const buySide = parseSide(sellRaw, 'buy');
-  const ts = Date.now();
-  
-  const spread = (sellSide.avg && buySide.avg) ? sellSide.avg - buySide.avg : null;
-  const spreadPct = (spread && buySide.avg) ? (spread / buySide.avg) * 100 : null;
-  
-  const snapshot = {
-    ts,
-    sellAvg: sellSide.avg, buyAvg: buySide.avg,
-    bestSell: sellSide.best, bestBuy: buySide.best,
-    sellDepth: sellSide.depth, buyDepth: buySide.depth,
-    spread, spreadPct,
-    sellOffers: sellSide.offers, buyOffers: buySide.offers,
-  };
-  
-  if (!env.P2P_KV) return { snapshot, history: [], day: null };
-  
-  await env.P2P_KV.put('p2p:latest', JSON.stringify(snapshot), { expirationTtl: 3600 });
-  
-  let history: any[] = [];
-  try {
-    const raw = await env.P2P_KV.get('p2p:history');
-    if (raw) history = JSON.parse(raw);
-  } catch {}
-  history.push({ ts, sellAvg: sellSide.avg, buyAvg: buySide.avg, spread, spreadPct });
-  if (history.length > P2P_HISTORY_POINTS) history = history.slice(-P2P_HISTORY_POINTS);
-  await env.P2P_KV.put('p2p:history', JSON.stringify(history), { expirationTtl: 691200 }); // 8 days
-  
-  const today = new Date(ts).toISOString().slice(0, 10);
-  let day = { date: today, highSell: 0, lowSell: null as number | null, highBuy: 0, lowBuy: null as number | null, polls: 0 };
-  try {
-    const raw = await env.P2P_KV.get(`p2p:day:${today}`);
-    if (raw) day = JSON.parse(raw);
-  } catch {}
-  
-  if (sellSide.avg) {
-    day.highSell = Math.max(day.highSell || 0, sellSide.avg);
-    if (day.lowSell === null) day.lowSell = sellSide.avg;
-    else day.lowSell = Math.min(day.lowSell, sellSide.avg);
-  }
-  if (buySide.avg) {
-    day.highBuy = Math.max(day.highBuy || 0, buySide.avg);
-    if (day.lowBuy === null) day.lowBuy = buySide.avg;
-    else day.lowBuy = Math.min(day.lowBuy, buySide.avg);
-  }
-  day.polls = (day.polls || 0) + 1;
-  await env.P2P_KV.put(`p2p:day:${today}`, JSON.stringify(day), { expirationTtl: 172800 }); // 2 days
-  
-  return { snapshot, history, day };
-}
-
-export default {
+const worker = {
   fetch: app.fetch,
-  async scheduled(_event: any, env: Bindings, ctx: any) {
-    if (!env.P2P_KV) return;
-    ctx.waitUntil(pollAndStore(env).catch((err: any) => console.error('[worker] poll failed:', err.message)));
-  }
+  scheduled: async (_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) => {
+    const snapshot = buildTrackerSnapshot(Date.now());
+    await persistTrackerSnapshot(env, snapshot);
+  },
 };
+
+export default worker;

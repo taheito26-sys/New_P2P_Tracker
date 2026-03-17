@@ -1,31 +1,32 @@
-// Demo mode: when no Cloudflare Workers backend is available,
-// provide mock data so the UI can be explored.
-
 import type { MerchantProfile } from '@/types/domain';
 
 let _demoMode: boolean | null = null;
+const DEMO_MODE_ENABLED = import.meta.env.VITE_ENABLE_DEMO_MODE === 'true';
 
 export async function isDemoMode(): Promise<boolean> {
   if (_demoMode !== null) return _demoMode;
+  if (!DEMO_MODE_ENABLED) {
+    _demoMode = false;
+    return _demoMode;
+  }
+
   try {
-    const res = await fetch('/api/auth/session', { method: 'GET' });
+    const res = await fetch('/api/auth/session', { method: 'GET', credentials: 'include' });
     const ct = res.headers.get('content-type') || '';
-    
-    // A 401 Unauthorized with JSON means the backend IS running.
+
     if (res.status === 401 && ct.includes('application/json')) {
       _demoMode = false;
     } else {
-      // If the response is HTML (Vite fallback) or 404, no backend is running
       _demoMode = !res.ok || ct.includes('text/html');
     }
   } catch {
-    _demoMode = true;
+    _demoMode = DEMO_MODE_ENABLED;
   }
   return _demoMode;
 }
 
 export function getDemoMode(): boolean {
-  return _demoMode ?? true;
+  return _demoMode ?? DEMO_MODE_ENABLED;
 }
 
 export const DEMO_USER = {
