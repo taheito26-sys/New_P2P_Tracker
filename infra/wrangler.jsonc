@@ -15,7 +15,7 @@
     {
       "binding": "DB",
       "database_name": "tracker-platform",
-      "database_id": "${D1_DATABASE_ID}"
+	  "database_id": "9b53d6c4-d67e-4dce-90fb-57b64cf95653"
     }
   ],
   "vars": {
