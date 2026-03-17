@@ -9,6 +9,19 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Camera, Cloud, CloudOff, Download, Upload, Trash2, RefreshCw, Pin, Eye, FileJson, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
+import {
+  clearTrackerStorage,
+  findTrackerStorageKey,
+  getCurrentTrackerState,
+  loadAutoBackupFromStorage,
+  loadCloudUrlFromStorage,
+  normalizeImportedTrackerState,
+  saveAutoBackupToStorage,
+  saveCloudUrlToStorage,
+} from '@/lib/tracker-backup';
+import { toTradeCsv, toTradeExcelTsv } from '@/lib/tracker-storage';
+
+const DEFAULT_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbyhMi7Eg2ww94tidtIhHEwjaKPsoYK-jsVGHPWIsMu-XUjgZgLuffP5_5Ka90DBrqguOw/exec';
 
 /* ── IDB Vault (Ring 1) ── */
 interface Snapshot {
@@ -110,11 +123,16 @@ function downloadBlob(content: string, filename: string, mime = 'application/jso
 }
 
 function getCurrentState(): Record<string, unknown> {
-  try {
-    const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state');
-    if (sk) return JSON.parse(localStorage.getItem(sk) || '{}');
-  } catch {}
-  return {};
+  return getCurrentTrackerState(localStorage);
+}
+
+async function clearTrackerVaultDb(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const req = indexedDB.deleteDatabase('p2p_tracker_vault');
+    req.onsuccess = () => resolve();
+    req.onerror = () => resolve();
+    req.onblocked = () => resolve();
+  });
 }
 
 /* ── Cloud version (Ring 2) type ── */
@@ -133,11 +151,11 @@ export default function VaultPage() {
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [snapDesc, setSnapDesc] = useState('');
   const [loading, setLoading] = useState(false);
-  const [cloudUrl, setCloudUrl] = useState(() => localStorage.getItem('gas_url') || '');
+  const [cloudUrl, setCloudUrl] = useState(() => loadCloudUrlFromStorage(localStorage) || DEFAULT_CLOUD_URL);
   const [cloudConnected, setCloudConnected] = useState(false);
   const [cloudVersions, setCloudVersions] = useState<CloudVersion[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
-  const [autoBackup, setAutoBackup] = useState(() => localStorage.getItem('gasAutoSave') === 'true');
+  const [autoBackup, setAutoBackup] = useState(() => loadAutoBackupFromStorage(localStorage));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -155,6 +173,12 @@ export default function VaultPage() {
   useEffect(() => {
     setCloudConnected(!!cloudUrl && cloudUrl.startsWith('https'));
   }, [cloudUrl]);
+
+  useEffect(() => {
+    if (!loadCloudUrlFromStorage(localStorage)) {
+      saveCloudUrlToStorage(localStorage, DEFAULT_CLOUD_URL);
+    }
+  }, []);
 
   const takeSnapshot = async () => {
     if (!snapDesc.trim()) {
@@ -180,8 +204,8 @@ export default function VaultPage() {
     const snap = await idbGet(id);
     if (!snap?.state) { toast.error('Snapshot not found'); return; }
     try {
-      const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state');
-      if (sk) localStorage.setItem(sk, JSON.stringify(snap.state));
+      const sk = findTrackerStorageKey(localStorage);
+      localStorage.setItem(sk, JSON.stringify(snap.state));
       toast.success('✓ Restored from local snapshot');
       window.location.reload();
     } catch (e: any) {
@@ -208,13 +232,13 @@ export default function VaultPage() {
 
   const saveCloudUrl = () => {
     if (!cloudUrl.trim()) { toast.error('Paste your Web App URL first'); return; }
-    localStorage.setItem('gas_url', cloudUrl.trim());
+    saveCloudUrlToStorage(localStorage, cloudUrl.trim());
     toast.success('✓ URL saved');
   };
 
   const handleAutoBackupToggle = (v: boolean) => {
     setAutoBackup(v);
-    localStorage.setItem('gasAutoSave', String(v));
+    saveAutoBackupToStorage(localStorage, v);
     toast(v ? 'Auto-backup ON' : 'Auto-backup OFF');
   };
 
@@ -230,10 +254,20 @@ export default function VaultPage() {
     const state = getCurrentState() as any;
     const trades = state.trades || [];
     if (!trades.length) { toast.error('No trades to export'); return; }
-    const headers = ['id', 'ts', 'amountUSDT', 'sellPriceQAR', 'feeQAR', 'note', 'voided'];
-    const rows = trades.map((t: any) => headers.map(h => JSON.stringify(t[h] ?? '')).join(','));
-    downloadBlob([headers.join(','), ...rows].join('\n'), `trades-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
+    downloadBlob(toTradeCsv(state), `trades-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
     toast.success('CSV exported');
+  };
+
+  const exportExcel = () => {
+    const state = getCurrentState() as any;
+    const trades = state.trades || [];
+    if (!trades.length) { toast.error('No trades to export'); return; }
+    downloadBlob(
+      toTradeExcelTsv(state),
+      `trades-${new Date().toISOString().slice(0, 10)}.xls`,
+      'application/vnd.ms-excel;charset=utf-8',
+    );
+    toast.success('Excel exported');
   };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -243,9 +277,10 @@ export default function VaultPage() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
+        const normalized = normalizeImportedTrackerState(data);
         if (!confirm('Import this data? It will replace your current state.')) return;
-        const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state') || 'tracker_state';
-        localStorage.setItem(sk, JSON.stringify(data));
+        const sk = findTrackerStorageKey(localStorage);
+        localStorage.setItem(sk, JSON.stringify(normalized));
         toast.success('Data imported — reloading…');
         setTimeout(() => window.location.reload(), 500);
       } catch {
@@ -256,10 +291,10 @@ export default function VaultPage() {
     e.target.value = '';
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!confirm('⚠ Clear ALL data? This cannot be undone unless you have a backup.')) return;
-    const sk = Object.keys(localStorage).find(k => k.startsWith('taheito') || k.startsWith('p2p_tracker') || k === 'tracker_state');
-    if (sk) localStorage.removeItem(sk);
+    clearTrackerStorage(localStorage);
+    await clearTrackerVaultDb();
     toast.success('Data cleared — reloading…');
     setTimeout(() => window.location.reload(), 500);
   };
@@ -483,7 +518,7 @@ export default function VaultPage() {
               </p>
 
               <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={() => toast('Excel export — coming soon')}>
+                <Button variant="outline" size="sm" onClick={exportExcel}>
                   <FileSpreadsheet className="w-3 h-3 mr-1" /> Excel
                 </Button>
                 <Button variant="outline" size="sm" onClick={exportJSON}>
