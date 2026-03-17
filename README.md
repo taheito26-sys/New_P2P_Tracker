@@ -19,9 +19,10 @@ npm install
 
 2. Configure Cloudflare resources in `infra/wrangler.jsonc`:
 
-- replace `REPLACE_WITH_KV_NAMESPACE_ID`
-- replace `REPLACE_WITH_D1_DATABASE_ID`
+- verify `kv_namespaces[0].id` and `d1_databases[0].database_id` match your Cloudflare resources
 - set `vars.ALLOWED_ORIGINS` to your frontend origin(s), comma-separated
+
+> Note: this repo is configured with explicit `P2P_KV` + `DB` bindings in `infra/wrangler.jsonc` and `migrations_dir: "d1/migrations"`.
 
 3. Initialize the local database:
 
@@ -59,7 +60,7 @@ npm run lint
 ## Deploy
 
 1. Apply D1 migrations to the target environment.
-2. Configure KV, D1, and `ALLOWED_ORIGINS`.
+2. Configure D1 and `ALLOWED_ORIGINS` (and optionally `P2P_KV` if you want persisted tracker history).
 3. Deploy the Worker:
 
 ```sh
