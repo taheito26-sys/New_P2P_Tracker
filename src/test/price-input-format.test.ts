@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPriceInputDisplay } from '@/lib/tracker-helpers';
+import { fmtP, formatPriceInputDisplay } from '@/lib/tracker-helpers';
 
 describe('formatPriceInputDisplay', () => {
   it('handles the requested edge cases', () => {
@@ -35,5 +35,14 @@ describe('formatPriceInputDisplay', () => {
       display: '2.1',
       summary: 'Up to 4 decimal places kept exactly as entered.',
     });
+  });
+});
+
+describe('fmtP', () => {
+  it('renders prices with at most 4 decimals and no forced trailing zeros', () => {
+    expect(fmtP(3.74)).toBe('3.74');
+    expect(fmtP(3.7456)).toBe('3.7456');
+    expect(fmtP(3.74836735)).toBe('3.7484');
+    expect(fmtP(3)).toBe('3');
   });
 });

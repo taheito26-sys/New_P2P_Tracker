@@ -38,7 +38,7 @@ export function formatPriceInputDisplay(input: string): PriceInputDisplayResult 
     return { display: raw, summary: 'Non-standard input kept as entered.' };
   }
 
-  const [, integerPart, decimals] = match;
+  const [, , decimals] = match;
   if (decimals === undefined) {
     return { display: raw, summary: 'Whole number kept without trailing zeros.' };
   }
@@ -61,7 +61,7 @@ export function formatPriceInputDisplay(input: string): PriceInputDisplayResult 
 export function fmtP(n: number): string {
   const x = num(n, 0);
   if (!Number.isFinite(x)) return '—';
-  return x.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
+  return x.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 export function fmtPct(n: number): string {
