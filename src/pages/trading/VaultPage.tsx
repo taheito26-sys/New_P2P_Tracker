@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Camera, Cloud, CloudOff, Download, Upload, Trash2, RefreshCw, Pin, Eye, FileJson, FileSpreadsheet, FileText, AlertTriangle, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
+import { fmtP, fmtQRaw, fmtU, num } from '@/lib/tracker-helpers';
 import {
   clearTrackerStorage,
   findTrackerStorageKey,
@@ -345,7 +346,15 @@ export default function VaultPage() {
     const trades = state.trades || [];
     if (!trades.length) { toast.error(t.lang === 'ar' ? 'لا توجد صفقات للتصدير' : 'No trades to export'); return; }
     const headers = ['id', 'ts', 'amountUSDT', 'sellPriceQAR', 'feeQAR', 'note', 'voided'];
-    const rows = trades.map((t: any) => headers.map(h => JSON.stringify(t[h] ?? '')).join(','));
+    const rows = trades.map((trade: any) => [
+      trade.id || '',
+      trade.ts || '',
+      fmtU(num(trade.amountUSDT ?? trade.quantity), 2),
+      fmtP(num(trade.sellPriceQAR ?? trade.unit_price)),
+      fmtQRaw(num(trade.feeQAR ?? trade.fee)),
+      trade.note ?? trade.notes ?? '',
+      String(Boolean(trade.voided ?? (trade.status === 'voided'))),
+    ].map(value => JSON.stringify(value)).join(','));
     downloadBlob([headers.join(','), ...rows].join('\n'), `trades-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
     setExportStatus('success');
     toast.success(t.lang === 'ar' ? 'تم تصدير CSV' : 'CSV exported');
@@ -364,13 +373,13 @@ export default function VaultPage() {
     const tradeHeaders = ['ID', 'Date', 'Amount USDT', 'Sell Price QAR', 'Fee QAR', 'Note', 'Voided'];
     const tradeRows = trades.map((tr: any) => [
       tr.id || '', new Date(tr.ts || tr.created_at || 0).toLocaleString(),
-      tr.amountUSDT ?? tr.quantity ?? '', tr.sellPriceQAR ?? tr.unit_price ?? '',
-      tr.feeQAR ?? tr.fee ?? '', tr.note ?? tr.notes ?? '', tr.voided ?? tr.status ?? ''
+      fmtU(num(tr.amountUSDT ?? tr.quantity), 2), fmtP(num(tr.sellPriceQAR ?? tr.unit_price)),
+      fmtQRaw(num(tr.feeQAR ?? tr.fee)), tr.note ?? tr.notes ?? '', String(Boolean(tr.voided ?? (tr.status === 'voided')))
     ].join('\t'));
     const batchHeaders = ['ID', 'Date', 'Quantity', 'Price', 'Source', 'Note'];
     const batchRows = batches.map((b: any) => [
       b.id || '', new Date(b.ts || b.acquired_at || b.created_at || 0).toLocaleString(),
-      b.qty ?? b.quantity ?? '', b.priceQAR ?? b.unit_cost ?? '',
+      fmtU(num(b.qty ?? b.quantity ?? b.initialUSDT), 2), fmtP(num(b.priceQAR ?? b.buyPriceQAR ?? b.unit_cost)),
       b.source ?? b.notes ?? '', b.note ?? ''
     ].join('\t'));
     const content = `TRADES\n${tradeHeaders.join('\t')}\n${tradeRows.join('\n')}\n\nBATCHES\n${batchHeaders.join('\t')}\n${batchRows.join('\n')}`;
