@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Camera, Cloud, CloudOff, Download, Upload, Trash2, RefreshCw, Pin, Eye, FileJson, FileSpreadsheet, FileText, AlertTriangle, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
+import { fmtP, fmtQRaw, fmtU, num } from '@/lib/tracker-helpers';
 import {
   clearTrackerStorage,
   findTrackerStorageKey,
@@ -149,6 +151,7 @@ interface CloudVersion {
 
 export default function VaultPage() {
   const t = useT();
+  const navigate = useNavigate();
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [snapDesc, setSnapDesc] = useState('');
   const [loading, setLoading] = useState(false);
@@ -172,6 +175,20 @@ export default function VaultPage() {
       setSnaps([]);
     }
   }, []);
+
+  const applyTrackerState = useCallback((state: Record<string, unknown>) => {
+    const storageKey = findTrackerStorageKey(localStorage);
+    localStorage.removeItem('tracker_data_cleared');
+    localStorage.setItem(storageKey, JSON.stringify(state));
+  }, []);
+
+  const finishVaultMutation = useCallback((message: string) => {
+    toast.success(message);
+    setImportStatus('idle');
+    setImportMsg('');
+    void loadSnaps();
+    navigate('/dashboard', { replace: true });
+  }, [loadSnaps, navigate]);
 
   useEffect(() => { loadSnaps(); }, [loadSnaps]);
 
@@ -203,11 +220,8 @@ export default function VaultPage() {
     const snap = await idbGet(id);
     if (!snap?.state) { toast.error(t.lang === 'ar' ? 'النسخة غير موجودة' : 'Snapshot not found'); return; }
     try {
-      const sk = findTrackerStorageKey(localStorage);
-      localStorage.removeItem('tracker_data_cleared');
-      localStorage.setItem(sk, JSON.stringify(snap.state));
-      toast.success(t.lang === 'ar' ? '✓ تمت الاستعادة' : '✓ Restored from local snapshot');
-      window.location.reload();
+      applyTrackerState(snap.state);
+      finishVaultMutation(t.lang === 'ar' ? '✓ تمت الاستعادة' : '✓ Restored from local snapshot');
     } catch (e: any) {
       toast.error((t.lang === 'ar' ? 'فشلت الاستعادة: ' : 'Restore failed: ') + e.message);
     }
@@ -301,11 +315,8 @@ export default function VaultPage() {
       if (result.data) {
         const state = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
         const normalized = normalizeImportedTrackerState(state);
-        const sk = findTrackerStorageKey(localStorage);
-        localStorage.removeItem('tracker_data_cleared');
-        localStorage.setItem(sk, JSON.stringify(normalized));
-        toast.success(t.lang === 'ar' ? '✓ تمت الاستعادة من السحابة' : '✓ Restored from cloud');
-        setTimeout(() => window.location.reload(), 500);
+        applyTrackerState(normalized);
+        finishVaultMutation(t.lang === 'ar' ? '✓ تمت الاستعادة من السحابة' : '✓ Restored from cloud');
       } else {
         toast.error('No data found in cloud version');
       }
@@ -335,7 +346,15 @@ export default function VaultPage() {
     const trades = state.trades || [];
     if (!trades.length) { toast.error(t.lang === 'ar' ? 'لا توجد صفقات للتصدير' : 'No trades to export'); return; }
     const headers = ['id', 'ts', 'amountUSDT', 'sellPriceQAR', 'feeQAR', 'note', 'voided'];
-    const rows = trades.map((t: any) => headers.map(h => JSON.stringify(t[h] ?? '')).join(','));
+    const rows = trades.map((trade: any) => [
+      trade.id || '',
+      trade.ts || '',
+      fmtU(num(trade.amountUSDT ?? trade.quantity), 2),
+      fmtP(num(trade.sellPriceQAR ?? trade.unit_price)),
+      fmtQRaw(num(trade.feeQAR ?? trade.fee)),
+      trade.note ?? trade.notes ?? '',
+      String(Boolean(trade.voided ?? (trade.status === 'voided'))),
+    ].map(value => JSON.stringify(value)).join(','));
     downloadBlob([headers.join(','), ...rows].join('\n'), `trades-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
     setExportStatus('success');
     toast.success(t.lang === 'ar' ? 'تم تصدير CSV' : 'CSV exported');
@@ -354,13 +373,13 @@ export default function VaultPage() {
     const tradeHeaders = ['ID', 'Date', 'Amount USDT', 'Sell Price QAR', 'Fee QAR', 'Note', 'Voided'];
     const tradeRows = trades.map((tr: any) => [
       tr.id || '', new Date(tr.ts || tr.created_at || 0).toLocaleString(),
-      tr.amountUSDT ?? tr.quantity ?? '', tr.sellPriceQAR ?? tr.unit_price ?? '',
-      tr.feeQAR ?? tr.fee ?? '', tr.note ?? tr.notes ?? '', tr.voided ?? tr.status ?? ''
+      fmtU(num(tr.amountUSDT ?? tr.quantity), 2), fmtP(num(tr.sellPriceQAR ?? tr.unit_price)),
+      fmtQRaw(num(tr.feeQAR ?? tr.fee)), tr.note ?? tr.notes ?? '', String(Boolean(tr.voided ?? (tr.status === 'voided')))
     ].join('\t'));
     const batchHeaders = ['ID', 'Date', 'Quantity', 'Price', 'Source', 'Note'];
     const batchRows = batches.map((b: any) => [
       b.id || '', new Date(b.ts || b.acquired_at || b.created_at || 0).toLocaleString(),
-      b.qty ?? b.quantity ?? '', b.priceQAR ?? b.unit_cost ?? '',
+      fmtU(num(b.qty ?? b.quantity ?? b.initialUSDT), 2), fmtP(num(b.priceQAR ?? b.buyPriceQAR ?? b.unit_cost)),
       b.source ?? b.notes ?? '', b.note ?? ''
     ].join('\t'));
     const content = `TRADES\n${tradeHeaders.join('\t')}\n${tradeRows.join('\n')}\n\nBATCHES\n${batchHeaders.join('\t')}\n${batchRows.join('\n')}`;
@@ -391,15 +410,12 @@ export default function VaultPage() {
           setImportStatus('idle');
           return;
         }
-        const sk = findTrackerStorageKey(localStorage);
-        localStorage.removeItem('tracker_data_cleared');
-        localStorage.setItem(sk, JSON.stringify(normalized));
+        applyTrackerState(normalized);
         setImportStatus('success');
         setImportMsg(t.lang === 'ar' 
           ? `✓ تم الاستيراد: ${tradeCount} صفقة، ${batchCount} دفعة` 
           : `✓ Imported: ${tradeCount} trades, ${batchCount} batches`);
-        toast.success(t.lang === 'ar' ? 'تم استيراد البيانات — جاري إعادة التحميل…' : 'Data imported — reloading…');
-        setTimeout(() => window.location.reload(), 1000);
+        finishVaultMutation(t.lang === 'ar' ? 'تم استيراد البيانات' : 'Data imported');
       } catch (err: any) {
         setImportStatus('error');
         setImportMsg(t.lang === 'ar' ? 'ملف JSON غير صالح أو تنسيق غير مدعوم' : 'Invalid JSON file or unsupported format');
@@ -419,8 +435,8 @@ export default function VaultPage() {
     clearTrackerStorage(localStorage);
     localStorage.setItem('tracker_data_cleared', 'true');
     await clearTrackerVaultDb();
-    toast.success(t.lang === 'ar' ? 'تم مسح البيانات — جاري إعادة التحميل…' : 'Data cleared — reloading…');
-    setTimeout(() => window.location.reload(), 500);
+    setSnaps([]);
+    finishVaultMutation(t.lang === 'ar' ? 'تم مسح البيانات' : 'Data cleared');
   };
 
   const fmtDate = (ts: number) => {

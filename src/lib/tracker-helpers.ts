@@ -23,10 +23,45 @@ export function fmtQRaw(v: number): string {
   return x.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
+
+export interface PriceInputDisplayResult {
+  display: string;
+  summary: string;
+}
+
+export function formatPriceInputDisplay(input: string): PriceInputDisplayResult {
+  const raw = String(input ?? '');
+  if (!raw) return { display: '', summary: 'Empty input left unchanged.' };
+
+  const match = raw.match(/^([+-]?\d+)(?:\.(\d*))?$/);
+  if (!match) {
+    return { display: raw, summary: 'Non-standard input kept as entered.' };
+  }
+
+  const [, , decimals] = match;
+  if (decimals === undefined) {
+    return { display: raw, summary: 'Whole number kept without trailing zeros.' };
+  }
+
+  if (decimals.length === 0) {
+    return { display: raw, summary: 'Trailing decimal point preserved while editing.' };
+  }
+
+  if (decimals.length <= 4) {
+    return { display: raw, summary: 'Up to 4 decimal places kept exactly as entered.' };
+  }
+
+  const rounded = Number(raw).toFixed(4).replace(/\.?(\d*?)0+$/, (_, trimmed) => trimmed ? `.${trimmed}` : '');
+  return {
+    display: rounded,
+    summary: 'More than 4 decimal places rounded for display; original value can still be stored separately.',
+  };
+}
+
 export function fmtP(n: number): string {
   const x = num(n, 0);
   if (!Number.isFinite(x)) return '—';
-  return x.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
+  return x.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 export function fmtPct(n: number): string {
