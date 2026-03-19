@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -149,6 +150,7 @@ interface CloudVersion {
 
 export default function VaultPage() {
   const t = useT();
+  const navigate = useNavigate();
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [snapDesc, setSnapDesc] = useState('');
   const [loading, setLoading] = useState(false);
@@ -172,6 +174,20 @@ export default function VaultPage() {
       setSnaps([]);
     }
   }, []);
+
+  const applyTrackerState = useCallback((state: Record<string, unknown>) => {
+    const storageKey = findTrackerStorageKey(localStorage);
+    localStorage.removeItem('tracker_data_cleared');
+    localStorage.setItem(storageKey, JSON.stringify(state));
+  }, []);
+
+  const finishVaultMutation = useCallback((message: string) => {
+    toast.success(message);
+    setImportStatus('idle');
+    setImportMsg('');
+    void loadSnaps();
+    navigate('/dashboard', { replace: true });
+  }, [loadSnaps, navigate]);
 
   useEffect(() => { loadSnaps(); }, [loadSnaps]);
 
@@ -203,11 +219,8 @@ export default function VaultPage() {
     const snap = await idbGet(id);
     if (!snap?.state) { toast.error(t.lang === 'ar' ? 'النسخة غير موجودة' : 'Snapshot not found'); return; }
     try {
-      const sk = findTrackerStorageKey(localStorage);
-      localStorage.removeItem('tracker_data_cleared');
-      localStorage.setItem(sk, JSON.stringify(snap.state));
-      toast.success(t.lang === 'ar' ? '✓ تمت الاستعادة' : '✓ Restored from local snapshot');
-      window.location.reload();
+      applyTrackerState(snap.state);
+      finishVaultMutation(t.lang === 'ar' ? '✓ تمت الاستعادة' : '✓ Restored from local snapshot');
     } catch (e: any) {
       toast.error((t.lang === 'ar' ? 'فشلت الاستعادة: ' : 'Restore failed: ') + e.message);
     }
@@ -301,11 +314,8 @@ export default function VaultPage() {
       if (result.data) {
         const state = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
         const normalized = normalizeImportedTrackerState(state);
-        const sk = findTrackerStorageKey(localStorage);
-        localStorage.removeItem('tracker_data_cleared');
-        localStorage.setItem(sk, JSON.stringify(normalized));
-        toast.success(t.lang === 'ar' ? '✓ تمت الاستعادة من السحابة' : '✓ Restored from cloud');
-        setTimeout(() => window.location.reload(), 500);
+        applyTrackerState(normalized);
+        finishVaultMutation(t.lang === 'ar' ? '✓ تمت الاستعادة من السحابة' : '✓ Restored from cloud');
       } else {
         toast.error('No data found in cloud version');
       }
@@ -391,15 +401,12 @@ export default function VaultPage() {
           setImportStatus('idle');
           return;
         }
-        const sk = findTrackerStorageKey(localStorage);
-        localStorage.removeItem('tracker_data_cleared');
-        localStorage.setItem(sk, JSON.stringify(normalized));
+        applyTrackerState(normalized);
         setImportStatus('success');
         setImportMsg(t.lang === 'ar' 
           ? `✓ تم الاستيراد: ${tradeCount} صفقة، ${batchCount} دفعة` 
           : `✓ Imported: ${tradeCount} trades, ${batchCount} batches`);
-        toast.success(t.lang === 'ar' ? 'تم استيراد البيانات — جاري إعادة التحميل…' : 'Data imported — reloading…');
-        setTimeout(() => window.location.reload(), 1000);
+        finishVaultMutation(t.lang === 'ar' ? 'تم استيراد البيانات' : 'Data imported');
       } catch (err: any) {
         setImportStatus('error');
         setImportMsg(t.lang === 'ar' ? 'ملف JSON غير صالح أو تنسيق غير مدعوم' : 'Invalid JSON file or unsupported format');
@@ -419,8 +426,8 @@ export default function VaultPage() {
     clearTrackerStorage(localStorage);
     localStorage.setItem('tracker_data_cleared', 'true');
     await clearTrackerVaultDb();
-    toast.success(t.lang === 'ar' ? 'تم مسح البيانات — جاري إعادة التحميل…' : 'Data cleared — reloading…');
-    setTimeout(() => window.location.reload(), 500);
+    setSnaps([]);
+    finishVaultMutation(t.lang === 'ar' ? 'تم مسح البيانات' : 'Data cleared');
   };
 
   const fmtDate = (ts: number) => {
