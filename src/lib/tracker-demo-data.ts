@@ -1,5 +1,6 @@
 // Demo data matching the TRACKER_CLOUDFLARE- repo state model
-import { uid, type TrackerState, type Batch, type Trade, type Customer, computeFIFO, type DerivedState } from './tracker-helpers';
+import { getCurrentTrackerState } from './tracker-backup';
+import { num, uid, type TrackerState, type Batch, type Trade, type Customer, computeFIFO, type DerivedState } from './tracker-helpers';
 
 const now = Date.now();
 const DAY = 86400000;
@@ -46,7 +47,115 @@ type DemoOverrides = Partial<TrackerState['settings']> & {
   currency?: TrackerState['currency'];
 };
 
+function normalizeBatch(raw: unknown): Batch | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const batch = raw as Partial<Batch> & Record<string, unknown>;
+  return {
+    id: typeof batch.id === 'string' && batch.id.trim() ? batch.id : uid(),
+    ts: num(batch.ts ?? batch.created_at ?? Date.now(), Date.now()),
+    source: typeof batch.source === 'string' ? batch.source : '',
+    note: typeof batch.note === 'string' ? batch.note : typeof batch.notes === 'string' ? batch.notes : '',
+    buyPriceQAR: num(batch.buyPriceQAR ?? batch.priceQAR ?? batch.unit_cost, 0),
+    initialUSDT: num(batch.initialUSDT ?? batch.qty ?? batch.quantity, 0),
+    revisions: Array.isArray(batch.revisions) ? batch.revisions : [],
+  };
+}
+
+function normalizeTrade(raw: unknown): Trade | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const trade = raw as Partial<Trade> & Record<string, unknown>;
+  const inputMode = trade.inputMode === 'QAR' ? 'QAR' : 'USDT';
+  const customerId = typeof trade.customerId === 'string'
+    ? trade.customerId
+    : typeof trade.customer_id === 'string'
+      ? trade.customer_id
+      : '';
+
+  return {
+    id: typeof trade.id === 'string' && trade.id.trim() ? trade.id : uid(),
+    ts: num(trade.ts ?? trade.created_at ?? Date.now(), Date.now()),
+    inputMode,
+    amountUSDT: num(trade.amountUSDT ?? trade.quantity, 0),
+    sellPriceQAR: num(trade.sellPriceQAR ?? trade.unit_price, 0),
+    feeQAR: num(trade.feeQAR ?? trade.fee, 0),
+    note: typeof trade.note === 'string' ? trade.note : typeof trade.notes === 'string' ? trade.notes : '',
+    voided: Boolean(trade.voided),
+    usesStock: trade.usesStock !== false,
+    revisions: Array.isArray(trade.revisions) ? trade.revisions : [],
+    customerId,
+    linkedDealId: typeof trade.linkedDealId === 'string' ? trade.linkedDealId : undefined,
+    linkedRelId: typeof trade.linkedRelId === 'string' ? trade.linkedRelId : undefined,
+    linkedMerchantId: typeof trade.linkedMerchantId === 'string' ? trade.linkedMerchantId : undefined,
+    agreementFamily: trade.agreementFamily === 'profit_share' || trade.agreementFamily === 'sales_deal' ? trade.agreementFamily : undefined,
+    agreementTemplateId: typeof trade.agreementTemplateId === 'string' ? trade.agreementTemplateId : undefined,
+    partnerPct: trade.partnerPct == null ? undefined : num(trade.partnerPct, 0),
+    merchantPct: trade.merchantPct == null ? undefined : num(trade.merchantPct, 0),
+    approvalStatus: typeof trade.approvalStatus === 'string' ? trade.approvalStatus as Trade['approvalStatus'] : undefined,
+    cancellationRequestedBy: typeof trade.cancellationRequestedBy === 'string' ? trade.cancellationRequestedBy : undefined,
+  };
+}
+
+function normalizeCustomer(raw: unknown): Customer | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const customer = raw as Partial<Customer> & Record<string, unknown>;
+  return {
+    id: typeof customer.id === 'string' && customer.id.trim() ? customer.id : uid(),
+    name: typeof customer.name === 'string' ? customer.name : '',
+    phone: typeof customer.phone === 'string' ? customer.phone : '',
+    tier: typeof customer.tier === 'string' && customer.tier.trim() ? customer.tier : 'C',
+    dailyLimitUSDT: num(customer.dailyLimitUSDT, 0),
+    notes: typeof customer.notes === 'string' ? customer.notes : '',
+    createdAt: num(customer.createdAt ?? customer.created_at ?? Date.now(), Date.now()),
+  };
+}
+
+function loadStoredTrackerState(overrides?: DemoOverrides): TrackerState | null {
+  if (typeof window === 'undefined') return null;
+  const isCleared = localStorage.getItem('tracker_data_cleared') === 'true';
+  if (isCleared) return null;
+
+  const stored = getCurrentTrackerState(localStorage);
+  if (!stored || Object.keys(stored).length === 0) return null;
+
+  const batches = Array.isArray(stored.batches)
+    ? stored.batches.map(normalizeBatch).filter((batch): batch is Batch => batch !== null)
+    : [];
+  const trades = Array.isArray(stored.trades)
+    ? stored.trades.map(normalizeTrade).filter((trade): trade is Trade => trade !== null)
+    : [];
+  const customers = Array.isArray(stored.customers)
+    ? stored.customers.map(normalizeCustomer).filter((customer): customer is Customer => customer !== null)
+    : [];
+  const settings = typeof stored.settings === 'object' && stored.settings !== null ? stored.settings as Record<string, unknown> : {};
+  const cal = typeof stored.cal === 'object' && stored.cal !== null ? stored.cal as Record<string, unknown> : {};
+
+  return {
+    currency: stored.currency === 'USDT' ? 'USDT' : overrides?.currency ?? 'QAR',
+    range: typeof stored.range === 'string' && stored.range.trim() ? stored.range : overrides?.range ?? '7d',
+    batches,
+    trades,
+    customers,
+    cashQAR: num(stored.cashQAR, 0),
+    cashOwner: typeof stored.cashOwner === 'string' ? stored.cashOwner : 'Main Account',
+    settings: {
+      lowStockThreshold: num(settings.lowStockThreshold, overrides?.lowStockThreshold ?? 5000),
+      priceAlertThreshold: num(settings.priceAlertThreshold, overrides?.priceAlertThreshold ?? 2),
+    },
+    cal: {
+      year: num(cal.year, new Date().getFullYear()),
+      month: num(cal.month, new Date().getMonth()),
+      selectedDay: cal.selectedDay == null ? null : num(cal.selectedDay, 0),
+    },
+  };
+}
+
 export function createDemoState(overrides?: DemoOverrides): { state: TrackerState; derived: DerivedState } {
+  const storedState = loadStoredTrackerState(overrides);
+  if (storedState) {
+    const derived = computeFIFO(storedState.batches, storedState.trades);
+    return { state: storedState, derived };
+  }
+
   const isCleared = typeof window !== 'undefined' && localStorage.getItem('tracker_data_cleared') === 'true';
 
   const batches = isCleared ? [] : makeBatches();
