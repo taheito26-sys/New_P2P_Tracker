@@ -67,3 +67,4 @@ wrangler deploy -c infra/wrangler.jsonc
 ```
 
 The cron in `infra/wrangler.jsonc` triggers the Worker scheduled handler every 5 minutes to refresh KV-backed P2P snapshot history.
+
