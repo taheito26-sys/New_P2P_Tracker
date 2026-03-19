@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createDemoState } from '@/lib/tracker-demo-data';
 import {
-  fmtU, fmtP, fmtQ, fmtDate, getWACOP, inRange, rangeLabel, fmtDur, computeFIFO, uid,
+  fmtU, fmtP, fmtQ, fmtDate, getWACOP, inRange, rangeLabel, fmtDur, computeFIFO, uid, formatPriceInputDisplay,
   type TrackerState, type Trade, type Customer, type TradeCalcResult, type LinkedTradeStatus,
 } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
@@ -112,6 +112,8 @@ export default function OrdersPage() {
   }, [settings.range, settings.currency, settings.lowStockThreshold, settings.priceAlertThreshold]);
 
   const wacop = getWACOP(derived);
+  const saleSellDisplay = formatPriceInputDisplay(saleSell);
+  const editSellDisplay = formatPriceInputDisplay(editSell);
   useEffect(() => { if (!saleSell && wacop) setSaleSell(fmtP(wacop)); }, [wacop, saleSell]);
 
   const rLabel = rangeLabel(state.range);
@@ -1037,7 +1039,7 @@ export default function OrdersPage() {
                   </div>
                   <div className="field2">
                     <div className="lbl">{t('sellPriceLabel')}</div>
-                    <div className="inputBox"><input inputMode="decimal" placeholder={wacop ? fmtP(wacop) : '0.00'} value={saleSell} onChange={e => setSaleSell(e.target.value)} /></div>
+                    <div className="inputBox"><input inputMode="decimal" placeholder={wacop ? fmtP(wacop) : '0.00'} title={saleSellDisplay.summary} value={saleSellDisplay.display} onChange={e => setSaleSell(e.target.value)} /></div>
                   </div>
                 </div>
 
@@ -1359,7 +1361,7 @@ export default function OrdersPage() {
                 </div>
                 <div className="field2">
                   <div className="lbl">{t('sellPriceQar')}</div>
-                  <div className="inputBox"><input inputMode="decimal" value={editSell} onChange={e => setEditSell(e.target.value)} disabled={isApproved} /></div>
+                  <div className="inputBox"><input inputMode="decimal" title={editSellDisplay.summary} value={editSellDisplay.display} onChange={e => setEditSell(e.target.value)} disabled={isApproved} /></div>
                 </div>
               </div>
 
