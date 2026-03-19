@@ -3,6 +3,7 @@ import { createDemoState } from '@/lib/tracker-demo-data';
 import {
   fmtU,
   fmtP,
+  formatPriceInputDisplay,
   fmtQ,
   fmtDate,
   fmtDur,
@@ -91,6 +92,8 @@ export default function StockPage() {
 
   const wacop = getWACOP(derived);
   const rLabel = rangeLabel(state.range);
+  const batchPriceDisplay = formatPriceInputDisplay(batchPrice);
+  const editPriceDisplay = formatPriceInputDisplay(editPrice);
 
   const query = (settings.searchQuery || '').trim().toLowerCase();
   const supplierLookup = useMemo(() => {
@@ -367,7 +370,7 @@ export default function StockPage() {
               <div className="g2tight">
                 <div className="field2">
                   <div className="lbl">{t('buyPriceQar')}</div>
-                  <div className="inputBox"><input inputMode="decimal" placeholder="3.74" value={batchPrice} onChange={(e) => setBatchPrice(e.target.value)} /></div>
+                  <div className="inputBox"><input inputMode="decimal" placeholder="3.74" title={batchPriceDisplay.summary} value={batchPriceDisplay.display} onChange={(e) => setBatchPrice(e.target.value)} /></div>
                 </div>
                 <div className="field2">
                   <div className="lbl">{batchMode === 'QAR' ? t('volumeQar') : t('amountUsdt')}</div>
@@ -532,7 +535,7 @@ export default function StockPage() {
                 </div>
                 <div className="field2">
                   <div className="lbl">{t('buyPriceQar')}</div>
-                  <div className="inputBox"><input inputMode="decimal" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} /></div>
+                  <div className="inputBox"><input inputMode="decimal" title={editPriceDisplay.summary} value={editPriceDisplay.display} onChange={(e) => setEditPrice(e.target.value)} /></div>
                 </div>
               </div>
               {editUsed > 1e-9 && (
