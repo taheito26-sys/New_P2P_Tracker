@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { assertDealStatusTransition } from '../src/lib/merchant-deal-status';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 
@@ -396,7 +397,7 @@ async function summaryForRelationship(c: Context<{ Bindings: Bindings; Variables
   let activeExposure = 0;
   let realizedProfit = 0;
   for (const deal of deals.results) {
-    if (['active', 'due', 'overdue'].includes(deal.status)) activeExposure += deal.amount || 0;
+    if (deal.status === 'approved') activeExposure += deal.amount || 0;
     realizedProfit += deal.realized_pnl || 0;
   }
 
@@ -963,7 +964,7 @@ merchant.post('/deals', async (c) => {
     body.title,
     body.amount || 0,
     body.currency || 'USDT',
-    'draft',
+    'pending',
     c.get('userId'),
     body.due_date || null,
     body.expected_return ?? null,
@@ -982,17 +983,24 @@ merchant.post('/deals', async (c) => {
 });
 
 merchant.patch('/deals/:id', async (c) => {
-  const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?')
+  const deal = await c.env.DB.prepare('SELECT relationship_id, status FROM merchant_deals WHERE id = ?')
     .bind(c.req.param('id'))
-    .first<{ relationship_id: string }>();
+    .first<{ relationship_id: string; status: import('../src/types/domain').DealStatus }>();
   if (!deal) return c.json({ error: 'Deal not found' }, 404);
 
   const access = await relationshipAccess(c, deal.relationship_id);
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
 
   const body = await c.req.json<{ status?: string }>();
-  if (!body.status || !['draft', 'active', 'due', 'settled', 'closed', 'overdue', 'cancelled'].includes(body.status)) {
+  if (!body.status || !['pending', 'approved'].includes(body.status)) {
     return c.json({ error: 'Only valid status updates are supported' }, 400);
+  }
+
+  try {
+    assertDealStatusTransition(deal.status, body.status as import('../src/types/domain').DealStatus);
+  } catch (error) {
+    console.warn('[merchant-deals] rejected illegal status transition', { dealId: c.req.param('id'), current: deal.status, next: body.status, userId: c.get('userId') });
+    return c.json({ error: `Deal status cannot transition from ${deal.status} to ${body.status}` }, 409);
   }
 
   await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, updated_at = datetime("now") WHERE id = ?')
@@ -1208,9 +1216,13 @@ merchant.post('/approvals/:id/approve', async (c) => {
       .bind(approval.target_entity_id)
       .first<{ deal_id: string }>();
     if (settlement) {
-      await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, updated_at = datetime("now") WHERE id = ?')
-        .bind('settled', settlement.deal_id)
-        .run();
+      const currentDeal = await c.env.DB.prepare('SELECT status FROM merchant_deals WHERE id = ?').bind(settlement.deal_id).first<{ status: import('../src/types/domain').DealStatus }>();
+      if (currentDeal) {
+        assertDealStatusTransition(currentDeal.status, 'approved');
+        await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, updated_at = datetime("now") WHERE id = ?')
+          .bind('approved', settlement.deal_id)
+          .run();
+      }
     }
   } else if (approval.target_entity_type === 'profit') {
     await c.env.DB.prepare('UPDATE merchant_profit_records SET status = ?, approved_at = datetime("now"), updated_at = datetime("now") WHERE id = ?')
@@ -1225,9 +1237,13 @@ merchant.post('/approvals/:id/approve', async (c) => {
         .run();
     }
   } else if (approval.type === 'deal_close') {
-    await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, close_date = date("now"), updated_at = datetime("now") WHERE id = ?')
-      .bind('closed', approval.target_entity_id)
-      .run();
+    const currentDeal = await c.env.DB.prepare('SELECT status FROM merchant_deals WHERE id = ?').bind(approval.target_entity_id).first<{ status: import('../src/types/domain').DealStatus }>();
+    if (currentDeal) {
+      assertDealStatusTransition(currentDeal.status, 'approved');
+      await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, close_date = date("now"), updated_at = datetime("now") WHERE id = ?')
+        .bind('approved', approval.target_entity_id)
+        .run();
+    }
   }
 
   return c.json({ ok: true });
@@ -1542,24 +1558,21 @@ app.get('/api/analytics', requireAuth, async (c) => {
 
   const today = new Date().toISOString().split('T')[0];
   deals.results.forEach((deal) => {
-    const isActive = ['active', 'due', 'overdue'].includes(deal.status);
-    const isSettled = ['settled', 'closed'].includes(deal.status);
-    const isOverdue = deal.status === 'overdue' || Boolean(deal.due_date && deal.due_date < today && isActive);
-    if (isOverdue) overdueDeals += 1;
+    const isApproved = deal.status === 'approved';
 
     totalDeployed += deal.amount || 0;
-    if (isActive) {
+    if (isApproved) {
       activeDeployed += deal.amount || 0;
       unsettledExposure += deal.amount || 0;
+      returnedCapital += deal.amount || 0;
     }
-    if (isSettled) returnedCapital += deal.amount || 0;
     realizedProfit += deal.realized_pnl || 0;
     dealsByType[deal.deal_type] = (dealsByType[deal.deal_type] || 0) + 1;
 
     const cp = cpMap.get(deal.relationship_id);
     if (cp) {
       cp.deployed += deal.amount || 0;
-      if (isSettled) cp.returned += deal.amount || 0;
+      if (isApproved) cp.returned += deal.amount || 0;
       cp.profit += deal.realized_pnl || 0;
     }
   });
@@ -1570,7 +1583,6 @@ app.get('/api/analytics', requireAuth, async (c) => {
   }));
 
   const riskIndicators: { type: string; severity: 'high' | 'medium' | 'low'; message: string }[] = [];
-  if (overdueDeals > 0) riskIndicators.push({ type: 'overdue', severity: 'high', message: `${overdueDeals} deal(s) overdue.` });
   capitalByCounterparty.forEach((cp) => {
     const pct = totalDeployed > 0 ? (cp.deployed / totalDeployed) * 100 : 0;
     if (pct > 50) {

@@ -9,16 +9,12 @@ import { Briefcase } from 'lucide-react';
 import { getAgreementFamilyLabel, getDealShares } from '@/lib/deal-templates';
 import { isSupportedDealType } from '@/types/domain';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { getAllowedDealStatusTransitions } from '@/lib/merchant-deal-status';
 import type { MerchantDeal, MerchantRelationship } from '@/types/domain';
 
 const statusColors: Record<string, string> = {
-  draft: 'bg-muted text-muted-foreground',
-  active: 'bg-success text-success-foreground',
-  due: 'bg-warning text-warning-foreground',
-  settled: 'bg-primary text-primary-foreground',
-  closed: 'bg-secondary text-secondary-foreground',
-  overdue: 'bg-destructive text-destructive-foreground',
-  cancelled: 'bg-muted text-muted-foreground',
+  pending: 'bg-warning text-warning-foreground',
+  approved: 'bg-success text-success-foreground',
 };
 
 export default function DealsPage() {
@@ -59,7 +55,7 @@ export default function DealsPage() {
     setEditingDeal(deal);
     setEditTitle(deal.title || '');
     setEditAmount(String(deal.amount || 0));
-    setEditStatus(deal.status || 'draft');
+    setEditStatus(deal.status || 'pending');
     setEditNote(String((deal.metadata as any)?.note || ''));
   };
 
@@ -128,7 +124,6 @@ export default function DealsPage() {
                   const isLegacy = !isSupportedDealType(deal.deal_type);
                   const merchantName = relationship?.counterparty?.display_name || '—';
                   const customerName = String((deal.metadata as any)?.customer_name || '');
-                  const isCancelled = deal.status === 'cancelled';
 
                   return (
                     <tr key={deal.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
@@ -145,7 +140,7 @@ export default function DealsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`text-xs ${statusColors[deal.status] || statusColors.draft}`}>{deal.status}</Badge>
+                        <Badge className={`text-xs ${statusColors[deal.status] || statusColors.pending}`}>{deal.status}</Badge>
                         {isLegacy && <Badge variant="secondary" className="text-xs ml-1">{t('legacyAgreement')}</Badge>}
                       </td>
                       <td className="px-4 py-3">
@@ -179,14 +174,12 @@ export default function DealsPage() {
                           >
                             {t('edit')}
                           </button>
-                          {!isCancelled && (
-                            <button
-                              onClick={() => setDeleteDealId(deal.id)}
-                              className="px-3 py-1.5 text-xs font-medium rounded-md border border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10 transition-colors"
-                            >
-                              {t('delete')}
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setDeleteDealId(deal.id)}
+                            className="px-3 py-1.5 text-xs font-medium rounded-md border border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10 transition-colors"
+                          >
+                            {t('delete')}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -255,11 +248,11 @@ export default function DealsPage() {
                   onChange={e => setEditStatus(e.target.value)}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 >
-                  <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                  <option value="closed">Closed</option>
-                  <option value="settled">Settled</option>
-                  <option value="cancelled">Cancelled</option>
+                  {[editingDeal?.status, ...getAllowedDealStatusTransitions((editingDeal?.status || 'pending') as any)]
+                    .filter((status, index, arr): status is string => Boolean(status) && arr.indexOf(status) === index)
+                    .map(status => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
                 </select>
               </div>
             </div>

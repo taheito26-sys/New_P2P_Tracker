@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS merchant_deals (
   title TEXT NOT NULL,
   amount REAL NOT NULL DEFAULT 0,
   currency TEXT NOT NULL DEFAULT 'USDT',
-  status TEXT NOT NULL DEFAULT 'draft',
+  status TEXT NOT NULL DEFAULT 'pending',
   metadata TEXT NOT NULL DEFAULT '{}',
   issue_date TEXT,
   due_date TEXT,

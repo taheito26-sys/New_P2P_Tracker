@@ -53,7 +53,7 @@ async function request<T>(
     ...(options.headers as Record<string, string> || {}),
   };
 
-  const res = await fetch(url, { ...options, headers, credentials: 'include' });
+  const res = await fetch(url, { ...options, headers, credentials: 'include', cache: 'no-store' });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
