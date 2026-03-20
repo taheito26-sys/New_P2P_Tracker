@@ -234,6 +234,11 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
   return actualHash === expectedHash;
 }
 
+function isMissingRateLimitTableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('no such table: auth_rate_limits');
+}
+
 async function applyRateLimit(
   c: Context<{ Bindings: Bindings }>,
   action: 'login' | 'signup' | 'reset-password',
@@ -247,27 +252,35 @@ async function applyRateLimit(
   const now = Date.now();
   const windowStartedAt = new Date(Math.floor(now / (windowSeconds * 1000)) * windowSeconds * 1000).toISOString();
 
-  await c.env.DB.prepare('DELETE FROM auth_rate_limits WHERE window_started_at < datetime("now", "-2 hours")').run();
+  try {
+    await c.env.DB.prepare('DELETE FROM auth_rate_limits WHERE window_started_at < datetime("now", "-2 hours")').run();
 
-  const existing = await c.env.DB.prepare(
-    'SELECT id, attempts FROM auth_rate_limits WHERE action = ? AND scope = ? AND window_started_at = ?',
-  ).bind(action, scope, windowStartedAt).first<{ id: string; attempts: number }>();
+    const existing = await c.env.DB.prepare(
+      'SELECT id, attempts FROM auth_rate_limits WHERE action = ? AND scope = ? AND window_started_at = ?',
+    ).bind(action, scope, windowStartedAt).first<{ id: string; attempts: number }>();
 
-  if (!existing) {
-    await c.env.DB.prepare(
-      'INSERT INTO auth_rate_limits (id, action, scope, attempts, window_started_at) VALUES (?, ?, ?, ?, ?)',
-    ).bind(`arl_${crypto.randomUUID()}`, action, scope, 1, windowStartedAt).run();
+    if (!existing) {
+      await c.env.DB.prepare(
+        'INSERT INTO auth_rate_limits (id, action, scope, attempts, window_started_at) VALUES (?, ?, ?, ?, ?)',
+      ).bind(`arl_${crypto.randomUUID()}`, action, scope, 1, windowStartedAt).run();
+      return null;
+    }
+
+    if (existing.attempts >= limit) {
+      return c.json({ error: 'Too many requests. Please try again later.' }, 429);
+    }
+
+    await c.env.DB.prepare('UPDATE auth_rate_limits SET attempts = attempts + 1 WHERE id = ?')
+      .bind(existing.id)
+      .run();
     return null;
+  } catch (error) {
+    if (isMissingRateLimitTableError(error)) {
+      console.warn('auth_rate_limits table is missing; skipping rate limiting until migration 003 is applied');
+      return null;
+    }
+    throw error;
   }
-
-  if (existing.attempts >= limit) {
-    return c.json({ error: 'Too many requests. Please try again later.' }, 429);
-  }
-
-  await c.env.DB.prepare('UPDATE auth_rate_limits SET attempts = attempts + 1 WHERE id = ?')
-    .bind(existing.id)
-    .run();
-  return null;
 }
 
 app.use('*', async (c, next) => {

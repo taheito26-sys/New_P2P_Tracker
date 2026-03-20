@@ -33,6 +33,8 @@ wrangler d1 execute tracker-platform --local --file=./infra/d1/migrations/002_us
 wrangler d1 execute tracker-platform --local --file=./infra/d1/migrations/003_auth_hardening.sql -c infra/wrangler.jsonc
 ```
 
+If migration `003_auth_hardening.sql` has not been applied yet, auth endpoints will continue to work but rate limiting will be skipped until the table exists.
+
 4. Run the app:
 
 ```sh
