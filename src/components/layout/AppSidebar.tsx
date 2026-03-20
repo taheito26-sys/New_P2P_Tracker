@@ -14,13 +14,12 @@ import {
   Calendar,
   UserCircle,
   CloudUpload,
-  MessageCircle,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { useT, type TranslationKey } from '@/lib/i18n';
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Badge } from '@/components/ui/badge';
+import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
 import { useRealtime } from '@/hooks/use-realtime';
 
@@ -41,7 +40,13 @@ const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'settings', icon: Settings, path: '/settings' },
 ];
 
-export function AppSidebar() {
+type AppSidebarProps = {
+  isMobile?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+};
+
+export function AppSidebar({ isMobile = false, mobileOpen = false, onMobileClose }: AppSidebarProps) {
   const location = useLocation();
   const { profile, userId, isAuthenticated, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
@@ -72,12 +77,16 @@ export function AppSidebar() {
     }
   });
 
-  return (
+  const sidebarContent = (
     <aside
       dir={t.isRTL ? 'rtl' : 'ltr'}
       className={cn(
-        'h-screen flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-all duration-300',
-        collapsed ? 'w-14' : 'w-52'
+        'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300',
+        isMobile
+          ? 'w-[280px] max-w-[85vw] shadow-2xl'
+          : collapsed
+            ? 'w-14'
+            : 'w-52'
       )}
     >
       {/* Header */}
@@ -90,9 +99,20 @@ export function AppSidebar() {
             <span className="font-display font-bold text-sm tracking-tight">{t('tracker')}</span>
           </div>
         )}
-        <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-md hover:bg-sidebar-accent transition-colors">
-          <ChevronLeft className={cn('w-4 h-4 transition-transform', collapsed && 'rotate-180')} />
-        </button>
+        {isMobile ? (
+          <button
+            onClick={onMobileClose}
+            className="rounded-md p-1.5 transition-colors hover:bg-sidebar-accent"
+            aria-label="Close navigation"
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          <button onClick={() => setCollapsed(!collapsed)} className="rounded-md p-1.5 transition-colors hover:bg-sidebar-accent" type="button">
+            <ChevronLeft className={cn('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
+          </button>
+        )}
       </div>
 
       {/* Profile */}
@@ -113,6 +133,7 @@ export function AppSidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={isMobile ? onMobileClose : undefined}
               className={cn(
                 'flex items-center gap-3 mx-2 px-3 py-2 rounded-md text-sm transition-colors',
                 active
@@ -134,6 +155,7 @@ export function AppSidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={isMobile ? onMobileClose : undefined}
               className={cn(
                 'flex items-center gap-3 mx-2 px-3 py-2 rounded-md text-sm transition-colors relative',
                 active
@@ -160,6 +182,7 @@ export function AppSidebar() {
       <div className="border-t border-sidebar-border p-2 space-y-1">
         <Link
           to="/notifications"
+          onClick={isMobile ? onMobileClose : undefined}
           className="flex items-center gap-3 mx-0 px-3 py-2 rounded-md text-sm hover:bg-sidebar-accent transition-colors"
         >
           <Bell className="w-4 h-4" />
@@ -174,5 +197,30 @@ export function AppSidebar() {
         </button>
       </div>
     </aside>
+  );
+
+  if (!isMobile) {
+    return sidebarContent;
+  }
+
+  return (
+    <>
+      <div
+        className={cn(
+          'fixed inset-0 z-40 bg-black/60 transition-opacity duration-300 md:hidden',
+          mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+        )}
+        onClick={onMobileClose}
+        aria-hidden="true"
+      />
+      <div
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 md:hidden transition-transform duration-300',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        {sidebarContent}
+      </div>
+    </>
   );
 }

@@ -110,12 +110,21 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: none;
+    min-height: 100dvh;
+  }
+
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-body);
+    margin: 0;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
@@ -124,6 +133,17 @@
   code, pre, .font-mono {
     font-family: var(--font-display);
   }
+}
+
+.app-shell {
+  width: 100%;
+  max-width: none;
+}
+
+.main-shell {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 @layer utilities {

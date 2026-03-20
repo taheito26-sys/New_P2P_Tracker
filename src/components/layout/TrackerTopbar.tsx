@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, Bell, Plus, Search } from 'lucide-react';
+import { Activity, Bell, Menu, Plus, Search } from 'lucide-react';
 import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
@@ -25,7 +25,11 @@ function titleFromPath(pathname: string, t: ReturnType<typeof useT>) {
   return { title: t('trackerTitle'), subtitle: t('trackerSub') };
 }
 
-export function TrackerTopbar() {
+type TrackerTopbarProps = {
+  onMenuClick?: () => void;
+};
+
+export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
   const { settings, update } = useTheme();
   const { profile, logout } = useAuth();
   const location = useLocation();
@@ -52,6 +56,11 @@ export function TrackerTopbar() {
   return (
     <header className="tracker-topbar" dir={t.isRTL ? 'rtl' : 'ltr'}>
       <div className="tracker-topbar-title-wrap">
+        {onMenuClick && (
+          <button className="tracker-menu-btn" type="button" onClick={onMenuClick} aria-label="Open navigation">
+            <Menu size={16} />
+          </button>
+        )}
         <div className="tracker-topbar-title">{meta.title}</div>
         <div className="tracker-topbar-sub">{meta.subtitle}</div>
       </div>
