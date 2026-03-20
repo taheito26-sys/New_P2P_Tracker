@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { AlertCircle, CheckCircle, Search, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -295,6 +295,9 @@ export function CreateDealDialog({
             {t('createNewDeal')}
             <Badge variant="outline" className="text-xs font-mono">{t('step')} {step}/3</Badge>
           </DialogTitle>
+          <DialogDescription>
+            Create a merchant deal for {counterpartyName} using the simplified pending-to-approved workflow.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Step 1: Choose deal type */}
