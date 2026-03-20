@@ -4,8 +4,18 @@ import { fmtU, fmtDate } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
 import '@/styles/tracker.css';
+import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CRMPage() {
+  if (!isSandboxDataEnabled()) {
+    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is available only in local development sandbox mode." />;
+  }
+
+  return <CRMPageSandbox />;
+}
+
+function CRMPageSandbox() {
   const { settings } = useTheme();
   const t = useT();
   const { state } = useMemo(() => createDemoState({

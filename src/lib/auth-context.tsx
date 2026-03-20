@@ -26,7 +26,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [demo, setDemo] = useState(false);
 
   const refreshProfile = useCallback(async () => {
-    if (getDemoMode()) {
+    if (getDemoMode() && DEMO_PROFILE) {
       setProfile(DEMO_PROFILE);
       return;
     }
@@ -43,8 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const demoActive = await isDemoMode();
       setDemo(demoActive);
 
-      if (demoActive) {
-        // Auto-login in demo mode
+      if (demoActive && DEMO_USER && DEMO_PROFILE) {
         setUserId(DEMO_USER.user_id);
         setEmail(DEMO_USER.email);
         setProfile(DEMO_PROFILE);
@@ -68,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshProfile]);
 
   const login = useCallback(async (email: string, password: string) => {
-    if (getDemoMode()) {
+    if (getDemoMode() && DEMO_USER && DEMO_PROFILE) {
       setUserId(DEMO_USER.user_id);
       setEmail(DEMO_USER.email);
       setProfile(DEMO_PROFILE);
@@ -83,7 +82,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = useCallback(async (email: string, password: string) => {
     if (getDemoMode()) {
-      // In demo mode, just succeed
       return;
     }
     await authApi.signup(email, password);

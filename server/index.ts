@@ -6,6 +6,7 @@ type Bindings = {
   DB: D1Database;
   P2P_KV: KVNamespace;
   ALLOWED_ORIGINS?: string;
+  APP_ENV?: string;
 };
 
 type Variables = {
@@ -69,6 +70,20 @@ type RelationshipAccess = {
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 let inMemoryResetCounter = 0;
+
+
+function appEnv(c: Context<{ Bindings: Bindings }>): string {
+  return (c.env.APP_ENV || 'production').trim().toLowerCase();
+}
+
+function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
+  return appEnv(c) === 'production';
+}
+
+function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
+  return !isProductionEnv(c);
+}
+
 
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
   return (c.env.ALLOWED_ORIGINS || '')
@@ -1121,10 +1136,16 @@ app.post('/api/merchant/notifications/read-all', requireAuth, async (c) => {
 app.get('/api/batches', requireAuth, (c) => c.json({ batches: [] }));
 app.get('/api/trades', requireAuth, (c) => c.json({ trades: [] }));
 app.get('/api/latest', async (c) => {
+  if (!p2pSandboxEnabled(c)) {
+    return c.json({ error: 'Live P2P market data is not configured for this environment' }, 503);
+  }
   const { snapshot } = await ensureTrackerState(c.env);
   return c.json(snapshot);
 });
 app.get('/api/history', async (c) => {
+  if (!p2pSandboxEnabled(c)) {
+    return c.json({ error: 'Live P2P market data is not configured for this environment' }, 503);
+  }
   const { history } = await ensureTrackerState(c.env);
   return c.json(history);
 });
@@ -1222,6 +1243,9 @@ app.onError((error, c) => c.json({ error: error.message }, 500));
 const worker = {
   fetch: app.fetch,
   scheduled: async (_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) => {
+    if ((env.APP_ENV || 'production').trim().toLowerCase() === 'production') {
+      return;
+    }
     const snapshot = buildTrackerSnapshot(Date.now());
     await persistTrackerSnapshot(env, snapshot);
   },
