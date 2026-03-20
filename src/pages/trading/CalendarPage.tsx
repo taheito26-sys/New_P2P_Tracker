@@ -1,26 +1,20 @@
 import { useMemo, useState } from 'react';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import {
   fmtQ, fmtU, fmtP, fmtPct, fmtQWithUnit,
 } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CalendarPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Calendar sandbox data is disabled" description="Synthetic calendar data is permanently disabled in this application." />;
-  }
-
-  return <CalendarPageSandbox />;
+  return <CalendarPageWorkspace />;
 }
 
-function CalendarPageSandbox() {
+function CalendarPageWorkspace() {
   const { settings } = useTheme();
   const t = useT();
-  const { state, derived } = useMemo(() => createDemoState({
+  const { state, derived } = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
   }), [settings.lowStockThreshold, settings.priceAlertThreshold]);

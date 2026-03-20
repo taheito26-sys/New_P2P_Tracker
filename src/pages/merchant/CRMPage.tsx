@@ -1,24 +1,18 @@
 import { useMemo, useState } from 'react';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import { fmtU, fmtDate } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CRMPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is permanently disabled in this application." />;
-  }
-
-  return <CRMPageSandbox />;
+  return <CRMPageWorkspace />;
 }
 
-function CRMPageSandbox() {
+function CRMPageWorkspace() {
   const { settings } = useTheme();
   const t = useT();
-  const { state } = useMemo(() => createDemoState({
+  const { state } = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
   }), [settings.lowStockThreshold, settings.priceAlertThreshold]);

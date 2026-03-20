@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import {
   fmtU, fmtP, fmtQ, fmtDate, getWACOP, inRange, rangeLabel, fmtDur, computeFIFO, uid, formatPriceInputDisplay,
   type TrackerState, type Trade, type Customer, type TradeCalcResult, type LinkedTradeStatus,
@@ -15,22 +15,16 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { toast } from 'sonner';
 import type { MerchantRelationship } from '@/types/domain';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function OrdersPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Orders sandbox data is disabled" description="Synthetic orders/trades data is permanently disabled in this application." />;
-  }
-
-  return <OrdersPageSandbox />;
+  return <OrdersPageWorkspace />;
 }
 
 const nowInput = () => new Date().toISOString().slice(0, 16);
 const normalizeName = (v: string) => v.trim().toLowerCase();
 function toInputFromTs(ts: number) { return new Date(ts).toISOString().slice(0, 16); }
 
-function OrdersPageSandbox() {
+function OrdersPageWorkspace() {
   const { settings } = useTheme();
   const { userId } = useAuth();
   const actorId = userId || 'governance-blocked-actor';
@@ -38,7 +32,7 @@ function OrdersPageSandbox() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
-  const initial = useMemo(() => createDemoState({
+  const initial = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
     range: settings.range,

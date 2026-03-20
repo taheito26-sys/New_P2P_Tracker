@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import {
   fmtU,
   fmtP,
@@ -25,15 +25,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function StockPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Stock sandbox data is disabled" description="Synthetic stock data is permanently disabled in this application." />;
-  }
-
-  return <StockPageSandbox />;
+  return <StockPageWorkspace />;
 }
 
 const nowInput = () => new Date().toISOString().slice(0, 16);
@@ -43,12 +37,12 @@ function inputFromTs(ts: number) {
   return new Date(ts).toISOString().slice(0, 16);
 }
 
-function StockPageSandbox() {
+function StockPageWorkspace() {
   const { settings, update } = useTheme();
   const t = useT();
   const isMobile = useIsMobile();
 
-  const initial = useMemo(() => createDemoState({
+  const initial = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
     range: settings.range,

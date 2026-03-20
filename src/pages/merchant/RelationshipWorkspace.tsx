@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import * as api from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import { useTheme } from '@/lib/theme-context';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MerchantRelationship, MerchantMessage, MerchantDeal, MerchantApproval } from '@/types/domain';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function RelationshipWorkspace() {
   return <RelationshipWorkspaceCore />;
@@ -53,25 +52,12 @@ function RelationshipWorkspaceCore() {
   const navigate = useNavigate();
   const t = useT();
 
-  const sharedData = useMemo(() => isSandboxDataEnabled()
-    ? createDemoState({
-      lowStockThreshold: settings.lowStockThreshold,
-      priceAlertThreshold: settings.priceAlertThreshold,
-    }).state
-    : {
-      currency: 'QAR' as const,
-      range: settings.range,
-      batches: [],
-      trades: [],
-      customers: [],
-      cashQAR: 0,
-      cashOwner: '',
-      settings: {
-        lowStockThreshold: settings.lowStockThreshold,
-        priceAlertThreshold: settings.priceAlertThreshold,
-      },
-      cal: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDay: null },
-    }, [settings.lowStockThreshold, settings.priceAlertThreshold, settings.range]);
+  const sharedData = useMemo(() => createTrackerState({
+    lowStockThreshold: settings.lowStockThreshold,
+    priceAlertThreshold: settings.priceAlertThreshold,
+    range: settings.range,
+    currency: settings.currency,
+  }).state, [settings.lowStockThreshold, settings.priceAlertThreshold, settings.range, settings.currency]);
   const [trackerState, setTrackerState] = useState(sharedData);
   const sharedCustomers = trackerState.customers;
   const sharedSuppliers = useMemo(() => {

@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import {
   fmtQWithUnit, fmtU, fmtQ, fmtPct, fmtP,
   kpiFor, totalStock, stockCostQAR, getWACOP,
@@ -11,22 +11,16 @@ import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import type { MerchantDeal, MerchantApproval } from '@/types/domain';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function DashboardPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Dashboard sandbox data is disabled" description="Synthetic dashboard and KPI data are permanently disabled in this application." />;
-  }
-
-  return <DashboardPageSandbox />;
+  return <DashboardPageWorkspace />;
 }
 
-function DashboardPageSandbox() {
+function DashboardPageWorkspace() {
   const { settings } = useTheme();
   const t = useT();
   const navigate = useNavigate();
-  const { state, derived } = useMemo(() => createDemoState({
+  const { state, derived } = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
   }), [settings.lowStockThreshold, settings.priceAlertThreshold]);
