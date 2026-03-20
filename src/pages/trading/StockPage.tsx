@@ -245,7 +245,7 @@ function StockPageSandbox() {
   };
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       <div className="twoColPage">
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
@@ -492,7 +492,7 @@ function StockPageSandbox() {
 
         return (
           <Dialog open={!!editingBatchId} onOpenChange={(open) => !open && setEditingBatchId(null)}>
-            <DialogContent className="tracker-root" style={{ maxWidth: 500, background: 'var(--bg)', border: `1px solid ${editFullyDepleted ? 'color-mix(in srgb, var(--bad) 30%, var(--line))' : 'color-mix(in srgb, var(--good) 25%, var(--line))'}`, borderRadius: 12, padding: 24, gap: 0 }}>
+            <DialogContent className="tracker-root w-[calc(100vw-1rem)] sm:max-w-[500px]" style={{ background: 'var(--bg)', border: `1px solid ${editFullyDepleted ? 'color-mix(in srgb, var(--bad) 30%, var(--line))' : 'color-mix(in srgb, var(--good) 25%, var(--line))'}`, borderRadius: 12, padding: 24, gap: 0 }}>
               <DialogHeader style={{ marginBottom: 14 }}>
                 <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('editBatchInPlace')}</DialogTitle>
               </DialogHeader>
