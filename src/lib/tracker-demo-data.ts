@@ -1,5 +1,6 @@
 // Demo data matching the TRACKER_CLOUDFLARE- repo state model
 import { getCurrentTrackerState } from './tracker-backup';
+import { assertSyntheticSandboxAccess } from '@/lib/governance';
 import { num, uid, type TrackerState, type Batch, type Trade, type Customer, computeFIFO, type DerivedState } from './tracker-helpers';
 
 const now = Date.now();
@@ -155,7 +156,34 @@ function loadStoredTrackerState(overrides?: DemoOverrides): TrackerState | null 
   };
 }
 
+
+export function createTrackerState(overrides?: DemoOverrides): { state: TrackerState; derived: DerivedState } {
+  const storedState = loadStoredTrackerState(overrides);
+  if (storedState) {
+    const derived = computeFIFO(storedState.batches, storedState.trades);
+    return { state: storedState, derived };
+  }
+
+  const state: TrackerState = {
+    currency: overrides?.currency ?? 'QAR',
+    range: overrides?.range ?? '7d',
+    batches: [],
+    trades: [],
+    customers: [],
+    cashQAR: 0,
+    cashOwner: '',
+    settings: {
+      lowStockThreshold: overrides?.lowStockThreshold ?? 5000,
+      priceAlertThreshold: overrides?.priceAlertThreshold ?? 2,
+    },
+    cal: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDay: null },
+  };
+
+  return { state, derived: computeFIFO(state.batches, state.trades) };
+}
+
 export function createDemoState(overrides?: DemoOverrides): { state: TrackerState; derived: DerivedState } {
+  assertSyntheticSandboxAccess('Synthetic tracker workspace data');
   const storedState = loadStoredTrackerState(overrides);
   if (storedState) {
     const derived = computeFIFO(storedState.batches, storedState.trades);
