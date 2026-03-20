@@ -9,7 +9,7 @@ import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CRMPage() {
   if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is available only in local development sandbox mode." />;
+    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is permanently disabled in this application." />;
   }
 
   return <CRMPageSandbox />;

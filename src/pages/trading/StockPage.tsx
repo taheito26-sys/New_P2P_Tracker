@@ -30,7 +30,7 @@ import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function StockPage() {
   if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Stock sandbox data is disabled" description="Synthetic stock data is available only in local development sandbox mode." />;
+    return <SandboxOnlyNotice title="Stock sandbox data is disabled" description="Synthetic stock data is permanently disabled in this application." />;
   }
 
   return <StockPageSandbox />;

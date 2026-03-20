@@ -16,7 +16,7 @@ import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function DashboardPage() {
   if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Dashboard sandbox data is disabled" description="Synthetic dashboard and KPI data is available only in local development sandbox mode." />;
+    return <SandboxOnlyNotice title="Dashboard sandbox data is disabled" description="Synthetic dashboard and KPI data are permanently disabled in this application." />;
   }
 
   return <DashboardPageSandbox />;

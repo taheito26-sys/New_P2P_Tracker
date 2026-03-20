@@ -11,7 +11,7 @@ import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CalendarPage() {
   if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Calendar sandbox data is disabled" description="Synthetic calendar data is available only in local development sandbox mode." />;
+    return <SandboxOnlyNotice title="Calendar sandbox data is disabled" description="Synthetic calendar data is permanently disabled in this application." />;
   }
 
   return <CalendarPageSandbox />;

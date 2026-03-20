@@ -20,7 +20,7 @@ import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function OrdersPage() {
   if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Orders sandbox data is disabled" description="Synthetic orders/trades data is available only in local development sandbox mode." />;
+    return <SandboxOnlyNotice title="Orders sandbox data is disabled" description="Synthetic orders/trades data is permanently disabled in this application." />;
   }
 
   return <OrdersPageSandbox />;

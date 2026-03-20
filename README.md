@@ -46,14 +46,7 @@ Worker API runs via Wrangler and is proxied through Vite at `/api`.
 
 ## Frontend and auth configuration
 
-Synthetic sandbox data is blocked by governance policy unless you explicitly enable both flags for a localhost-only development session. For that narrow local workflow, set:
-
-```sh
-VITE_ENABLE_DEMO_MODE=true
-VITE_ENABLE_SANDBOX_DATA=true
-```
-
-The frontend now requires **both** flags and a localhost origin before any synthetic generators can run, and the Worker should still use `vars.APP_ENV=development` only for local testing while remaining `production` in deployed environments.
+Synthetic sandbox and demo data are permanently disabled by governance policy in this codebase. No frontend flag or hostname can re-enable them; use live or user-provided data instead.
 
 ## Validation
 
