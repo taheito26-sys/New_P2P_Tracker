@@ -26,10 +26,11 @@ function titleFromPath(pathname: string, t: ReturnType<typeof useT>) {
 }
 
 type TrackerTopbarProps = {
+  isMobile?: boolean;
   onMenuClick?: () => void;
 };
 
-export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
+export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarProps) {
   const { settings, update } = useTheme();
   const { profile, logout } = useAuth();
   const location = useLocation();
@@ -61,12 +62,14 @@ export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
             <Menu size={16} />
           </button>
         )}
-        <div className="tracker-topbar-title">{meta.title}</div>
-        <div className="tracker-topbar-sub">{meta.subtitle}</div>
+        <div className="tracker-topbar-heading">
+          <div className="tracker-topbar-title">{meta.title}</div>
+          <div className="tracker-topbar-sub">{meta.subtitle}</div>
+        </div>
       </div>
 
       <div className="tracker-topbar-controls">
-        <label className="tracker-search" aria-label={t('search')}>
+        <label className={cn('tracker-search', isMobile && 'tracker-search--mobile')} aria-label={t('search')}>
           <Search className="tracker-search-icon" />
           <input
             value={search}
@@ -75,7 +78,7 @@ export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
           />
         </label>
 
-        <div className="tracker-seg" role="group" aria-label={t('dateRange')}>
+        <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('dateRange')}>
           {RANGE_OPTIONS.map((opt) => (
             <button
               key={opt.id}
@@ -88,17 +91,17 @@ export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
           ))}
         </div>
 
-        <div className="tracker-seg" role="group" aria-label={t('currency')}>
+        <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('currency')}>
           <button className={cn(settings.currency === 'QAR' && 'active')} onClick={() => update({ currency: 'QAR' })} type="button">QAR</button>
           <button className={cn(settings.currency === 'USDT' && 'active')} onClick={() => update({ currency: 'USDT' })} type="button">USDT</button>
         </div>
 
-        <div className="tracker-seg" role="group" aria-label={t('language')}>
+        <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('language')}>
           <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
           <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
         </div>
 
-        <div className="tracker-alert-box">
+        <div className={cn('tracker-alert-box', isMobile && 'tracker-alert-box--compact')}>
           <Bell className="tracker-alert-icon" />
           <input
             type="number"
@@ -110,11 +113,11 @@ export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
           <span>%</span>
         </div>
 
-        <button className="tracker-icon-btn" type="button" title={t('diagnostics')}>
+        <button className={cn('tracker-icon-btn', isMobile && 'tracker-icon-btn--compact')} type="button" title={t('diagnostics')}>
           <Activity size={14} />
         </button>
 
-        <span className="tracker-sync">{t('synced')}</span>
+        {!isMobile && <span className="tracker-sync">{t('synced')}</span>}
 
         <div className="tracker-user">
           <span className="tracker-user-avatar">{(profile?.display_name || 'U').charAt(0).toUpperCase()}</span>
@@ -122,10 +125,10 @@ export function TrackerTopbar({ onMenuClick }: TrackerTopbarProps) {
             <strong>{profile?.display_name || t('user')}</strong>
             <small>{profile?.merchant_id ? `${t('clientId')}: ${profile.merchant_id}` : `${t('clientId')}: N/A`}</small>
           </div>
-          <button className="tracker-signout" onClick={logout} type="button">{t('signOut')}</button>
+          {!isMobile && <button className="tracker-signout" onClick={logout} type="button">{t('signOut')}</button>}
         </div>
 
-        <button className="tracker-plus" type="button" onClick={() => navigate('/trading/orders')}>
+        <button className={cn('tracker-plus', isMobile && 'tracker-plus--mobile')} type="button" onClick={() => navigate('/trading/orders')}>
           <Plus size={16} />
         </button>
       </div>

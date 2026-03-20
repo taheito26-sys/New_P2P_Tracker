@@ -561,7 +561,7 @@ function OrdersPageSandbox() {
   );
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
 
       {/* ─── TAB BAR ─── */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
@@ -1170,7 +1170,7 @@ function OrdersPageSandbox() {
         const isLockedTrade = editingTrade ? isPartnerLinkedTrade(editingTrade) : false;
         return (
           <Dialog open={!!editingTradeId} onOpenChange={open => !open && setEditingTradeId(null)}>
-            <DialogContent className="tracker-root" style={{ maxWidth: 500, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--good) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
+            <DialogContent className="tracker-root w-[calc(100vw-1rem)] sm:max-w-[500px]" style={{ background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--good) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
               <DialogHeader style={{ marginBottom: 14 }}>
                 <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('correctTradeTitle')}</DialogTitle>
               </DialogHeader>
@@ -1286,7 +1286,7 @@ function OrdersPageSandbox() {
 
       {/* ─── CANCELLATION REQUEST DIALOG ─── */}
       <Dialog open={!!cancelTradeId} onOpenChange={open => !open && setCancelTradeId(null)}>
-        <DialogContent className="tracker-root" style={{ maxWidth: 420, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--warn) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
+        <DialogContent className="tracker-root w-[calc(100vw-1rem)] sm:max-w-[420px]" style={{ background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--warn) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
           <DialogHeader style={{ marginBottom: 14 }}>
             <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('requestCancellationTitle')}</DialogTitle>
           </DialogHeader>

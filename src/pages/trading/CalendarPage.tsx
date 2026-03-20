@@ -88,7 +88,7 @@ function CalendarPageSandbox() {
   const selectDay = (d: number) => setCal(prev => ({ ...prev, selectedDay: prev.selectedDay === d ? null : d }));
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       {/* Stats */}
       <div className="cal-stats">
         <div className="cal-stat">

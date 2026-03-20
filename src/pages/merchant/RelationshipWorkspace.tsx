@@ -210,19 +210,19 @@ function RelationshipWorkspaceCore() {
   const overdueCount = relDeals.filter(d => d.status === 'overdue').length;
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'} className="flex flex-col h-[calc(100vh-3.5rem)] border border-border/50 rounded-xl overflow-hidden bg-card mx-1 my-1">
+    <div dir={t.isRTL ? 'rtl' : 'ltr'} className="mx-1 my-1 flex min-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-xl border border-border/50 bg-card md:h-[calc(100vh-3.5rem)]">
 
       {/* ─── HEADER ─── */}
-      <div className="shrink-0 flex items-center gap-2.5 px-4 h-[52px] border-b border-border bg-card">
+      <div className="shrink-0 flex flex-wrap items-start gap-2.5 border-b border-border bg-card px-3 py-3 sm:px-4 md:min-h-[52px] md:items-center md:py-2">
         <button onClick={() => navigate('/network')} className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors shrink-0">
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="w-9 h-9 rounded-full bg-blue-500/10 flex items-center justify-center text-[14px] font-medium text-blue-600 dark:text-blue-400 shrink-0">
           {counterpartyName.charAt(0).toUpperCase()}
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-medium">{counterpartyName}</h1>
+            <h1 className="truncate text-[15px] font-medium">{counterpartyName}</h1>
             <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${
               rel.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30' :
               rel.status === 'restricted' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/30' :
@@ -236,7 +236,7 @@ function RelationshipWorkspaceCore() {
         {/* Chat toggle */}
         <button
           onClick={() => setChatOpen(!chatOpen)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] font-medium transition-colors relative ${
+          className={`order-3 flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors relative md:order-none ${
             chatOpen ? 'bg-blue-500/10 border-blue-500/30 text-blue-600' : 'border-border text-muted-foreground hover:bg-secondary'
           }`}
         >
@@ -253,7 +253,7 @@ function RelationshipWorkspaceCore() {
         {/* New deal */}
         <button
           onClick={() => setCreateDealOpen(true)}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity"
+          className="order-4 flex items-center gap-1.5 rounded-lg bg-foreground px-3.5 py-1.5 text-[12px] font-medium text-background transition-opacity hover:opacity-90 md:order-none"
         >
           <Plus className="w-3.5 h-3.5" />
           {t('newDeal')}
@@ -261,7 +261,7 @@ function RelationshipWorkspaceCore() {
       </div>
 
       {/* ─── KPI STRIP ─── */}
-      <div className="shrink-0 grid grid-cols-4 gap-2 px-4 py-2.5 border-b border-border">
+      <div className="shrink-0 grid grid-cols-2 gap-2 border-b border-border px-3 py-2.5 sm:grid-cols-2 lg:grid-cols-4 lg:px-4">
         <div className="px-3 py-2 rounded-lg bg-secondary">
           <p className="text-[11px] text-muted-foreground">{t('activeDeals')}</p>
           <p className="text-xl font-medium leading-tight mt-0.5">{activeDeals.length}</p>
@@ -294,7 +294,7 @@ function RelationshipWorkspaceCore() {
         const linkedDeal = a.target_entity_type === 'deal' ? relDeals.find(d => d.id === a.target_entity_id) : null;
         const payload = a.proposed_payload || {};
         return (
-          <div key={a.id} className="shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-[12px]">
+          <div key={a.id} className="shrink-0 flex flex-wrap items-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] lg:px-4">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
             <span className="flex-1 min-w-0 truncate">
               <span className="font-medium capitalize">{a.type.replace(/_/g, ' ')}</span>
@@ -312,7 +312,7 @@ function RelationshipWorkspaceCore() {
       })}
 
       {/* ─── DEALS TABLE (main content, full width) ─── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {relDeals.length === 0 ? (
           <div className="text-center py-20">
             <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center mx-auto mb-3">
@@ -322,7 +322,8 @@ function RelationshipWorkspaceCore() {
             <button onClick={() => setCreateDealOpen(true)} className="mt-3 text-[12px] font-medium text-blue-600 hover:underline">Create your first deal</button>
           </div>
         ) : (
-          <table className="w-full text-[13px]">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-[13px]">
             <thead>
               <tr className="border-b border-border bg-secondary sticky top-0 z-[1]">
                 <th className="text-left px-4 py-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Deal</th>
@@ -408,6 +409,7 @@ function RelationshipWorkspaceCore() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { useState } from 'react';
-import { AppSidebar } from './AppSidebar';
+import { AppSidebar, MobileBottomNav } from './AppSidebar';
 import { TrackerTopbar } from './TrackerTopbar';
 import { useTheme } from '@/lib/theme-context';
 import { useRealtime } from '@/hooks/use-realtime';
@@ -23,10 +23,14 @@ export function AppLayout() {
         onMobileClose={() => setMobileSidebarOpen(false)}
       />
       <main className="main-shell flex min-w-0 flex-1 flex-col overflow-hidden">
-        <TrackerTopbar onMenuClick={isMobile ? () => setMobileSidebarOpen(true) : undefined} />
-        <div className="flex-1 overflow-x-hidden overflow-y-auto">
+        <TrackerTopbar
+          isMobile={isMobile}
+          onMenuClick={isMobile ? () => setMobileSidebarOpen(true) : undefined}
+        />
+        <div className="app-content-scroll flex-1 overflow-x-hidden overflow-y-auto">
           <Outlet />
         </div>
+        {isMobile && <MobileBottomNav onMoreClick={() => setMobileSidebarOpen(true)} />}
       </main>
     </div>
   );
