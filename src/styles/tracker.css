@@ -426,7 +426,7 @@
 
 @media (max-width: 768px) {
   .tracker-root .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tracker-root .kpi-band-grid { grid-template-columns: 1fr; }
+  .tracker-root .kpi-band-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tracker-root .twoColPage { grid-template-columns: 1fr; }
   .tracker-root .dash-bottom { grid-template-columns: 1fr; }
   .tracker-root .cal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -434,6 +434,10 @@
   .tracker-root .cal-day { min-height: 52px; }
   .tracker-root .cal-profit { font-size: calc(7px * var(--ui-scale,1)); }
   .tracker-root .cal-count { font-size: calc(6px * var(--ui-scale,1)); }
+  .tracker-root .kpi-card { padding: 8px; }
+  .tracker-root .kpi-band { padding: 8px; }
+  .tracker-root .kpi-val { font-size: calc(12px * var(--ui-scale,1)); }
+  .tracker-root .kpi-cell-val { font-size: calc(12px * var(--ui-scale,1)); }
 
   .tracker-topbar { gap: 8px; padding: 10px; }
   .tracker-topbar-controls { width: 100%; gap: 6px; }
@@ -458,6 +462,7 @@
   .tracker-seg--mobile { flex: 1 1 100%; }
   .tracker-alert-box--compact { flex: 1 1 calc(50% - 4px); }
   .tracker-alert-box--mobile-panel { flex-basis: calc(100% - 46px); }
+  .tracker-root .kpi-band-cols { grid-template-columns: 1fr; gap: 6px; }
   .tracker-root .cal-day { min-height: 46px; padding: 3px 1px; }
   .tracker-root .cal-num { font-size: calc(9px * var(--ui-scale,1)); }
   .tracker-root .cal-profit { font-size: calc(6px * var(--ui-scale,1)); }
