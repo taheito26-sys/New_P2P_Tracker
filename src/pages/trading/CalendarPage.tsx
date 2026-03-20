@@ -6,8 +6,18 @@ import {
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
 import '@/styles/tracker.css';
+import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CalendarPage() {
+  if (!isSandboxDataEnabled()) {
+    return <SandboxOnlyNotice title="Calendar sandbox data is disabled" description="Synthetic calendar data is available only in local development sandbox mode." />;
+  }
+
+  return <CalendarPageSandbox />;
+}
+
+function CalendarPageSandbox() {
   const { settings } = useTheme();
   const t = useT();
   const { state, derived } = useMemo(() => createDemoState({

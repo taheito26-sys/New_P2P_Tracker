@@ -1,40 +1,25 @@
 import type { MerchantProfile } from '@/types/domain';
+import { isDemoModeEnabled } from '@/lib/runtime-mode';
 
 let _demoMode: boolean | null = null;
-const DEMO_MODE_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_MODE === 'true';
 
 export async function isDemoMode(): Promise<boolean> {
   if (_demoMode !== null) return _demoMode;
-  if (!DEMO_MODE_ENABLED) {
-    _demoMode = false;
-    return _demoMode;
-  }
-
-  try {
-    const res = await fetch('/api/auth/session', { method: 'GET', credentials: 'include' });
-    const ct = res.headers.get('content-type') || '';
-
-    if (res.status === 401 && ct.includes('application/json')) {
-      _demoMode = false;
-    } else {
-      _demoMode = !res.ok || ct.includes('text/html');
-    }
-  } catch {
-    _demoMode = DEMO_MODE_ENABLED;
-  }
+  _demoMode = isDemoModeEnabled();
   return _demoMode;
 }
 
 export function getDemoMode(): boolean {
-  return _demoMode ?? DEMO_MODE_ENABLED;
+  return _demoMode ?? isDemoModeEnabled();
 }
 
-export const DEMO_USER = {
+export const DEMO_USER = isDemoModeEnabled() ? {
   user_id: 'demo-user-001',
   email: 'demo@tracker.local',
-};
+  token: 'demo-token',
+} : null;
 
-export const DEMO_PROFILE: MerchantProfile = {
+export const DEMO_PROFILE: MerchantProfile | null = DEMO_USER ? {
   id: 'demo-merchant-001',
   owner_user_id: DEMO_USER.user_id,
   merchant_id: 'MRC-00000001',
@@ -48,4 +33,4 @@ export const DEMO_PROFILE: MerchantProfile = {
   status: 'active',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
-};
+} : null;

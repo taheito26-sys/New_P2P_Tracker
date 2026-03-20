@@ -11,8 +11,18 @@ import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import type { MerchantDeal, MerchantApproval } from '@/types/domain';
 import '@/styles/tracker.css';
+import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function DashboardPage() {
+  if (!isSandboxDataEnabled()) {
+    return <SandboxOnlyNotice title="Dashboard sandbox data is disabled" description="Synthetic dashboard and KPI data is available only in local development sandbox mode." />;
+  }
+
+  return <DashboardPageSandbox />;
+}
+
+function DashboardPageSandbox() {
   const { settings } = useTheme();
   const t = useT();
   const navigate = useNavigate();

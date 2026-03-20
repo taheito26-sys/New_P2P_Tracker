@@ -24,6 +24,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import '@/styles/tracker.css';
+import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
+
+export default function StockPage() {
+  if (!isSandboxDataEnabled()) {
+    return <SandboxOnlyNotice title="Stock sandbox data is disabled" description="Synthetic stock data is available only in local development sandbox mode." />;
+  }
+
+  return <StockPageSandbox />;
+}
 
 const nowInput = () => new Date().toISOString().slice(0, 16);
 const norm = (v: string) => v.trim().toLowerCase();
@@ -32,7 +42,7 @@ function inputFromTs(ts: number) {
   return new Date(ts).toISOString().slice(0, 16);
 }
 
-export default function StockPage() {
+function StockPageSandbox() {
   const { settings, update } = useTheme();
   const t = useT();
 

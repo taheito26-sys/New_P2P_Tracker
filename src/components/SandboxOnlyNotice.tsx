@@ -1,0 +1,24 @@
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+interface SandboxOnlyNoticeProps {
+  title: string;
+  description: string;
+}
+
+export function SandboxOnlyNotice({ title, description }: SandboxOnlyNoticeProps) {
+  return (
+    <div className="min-h-[320px] flex items-center justify-center p-4">
+      <Card className="w-full max-w-2xl glass">
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            This view is intentionally available only in local/development sandbox mode.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

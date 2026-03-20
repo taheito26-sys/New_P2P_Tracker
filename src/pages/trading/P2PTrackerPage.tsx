@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { p2p } from '@/lib/api';
-import { getDemoMode } from '@/lib/demo-mode';
-import { generateP2PHistory, computeDailySummaries } from '@/lib/p2p-demo-data';
+import { ApiError, p2p } from '@/lib/api';
+import { computeDailySummaries, generateP2PHistory } from '@/lib/p2p-demo-data';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 import { useT } from '@/lib/i18n';
 import { toast } from 'sonner';
 import type { P2PSnapshot, P2PHistoryPoint, P2POffer } from '@/types/domain';
@@ -24,6 +24,8 @@ export default function P2PTrackerPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sandboxMode = isSandboxDataEnabled();
   const [showHistory, setShowHistory] = useState(false);
   const [historyRange, setHistoryRange] = useState<'7d' | '15d'>('7d');
 
@@ -40,34 +42,32 @@ export default function P2PTrackerPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      if (getDemoMode() || market !== 'qatar') {
-        // Demo mode for all markets; live API only supports Qatar currently
+      if (sandboxMode) {
         const demo = generateP2PHistory(market);
         setSnapshot(demo.snapshot);
         setHistory(demo.history);
         setLastUpdate(new Date().toISOString());
-      } else {
-        try {
-          const [s, h] = await Promise.all([p2p.latest(market), p2p.history(market)]);
-          setSnapshot(s);
-          setHistory(Array.isArray(h) ? h : []);
-          setLastUpdate(new Date().toISOString());
-        } catch {
-          // Fallback to demo data if API fails
-          const demo = generateP2PHistory(market);
-          setSnapshot(demo.snapshot);
-          setHistory(demo.history);
-          setLastUpdate(new Date().toISOString());
-        }
+        return;
       }
+
+      const [s, h] = await Promise.all([p2p.latest(market), p2p.history(market)]);
+      setSnapshot(s);
+      setHistory(Array.isArray(h) ? h : []);
+      setLastUpdate(new Date().toISOString());
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load P2P data';
+      const msg = err instanceof ApiError && err.status === 503
+        ? 'Live P2P market data is not configured for this environment.'
+        : err instanceof Error ? err.message : 'Failed to load P2P data';
+      setSnapshot(null);
+      setHistory([]);
+      setError(msg);
       toast.error(msg);
     } finally {
       setLoading(false);
     }
-  }, [market]);
+  }, [market, sandboxMode]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -160,12 +160,25 @@ export default function P2PTrackerPage() {
   const fitsStock = (o: P2POffer) => o.min <= userStock * o.price && o.max >= o.min;
   const fitsCash = (o: P2POffer) => o.min <= userCash;
 
-  if (loading && !snapshot) {
+  if (loading && !snapshot && !error) {
     return (
       <div className="tracker-root" style={{ padding: 10 }}>
         <div className="empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <div className="empty-t">{t.lang === 'ar' ? 'جاري تحميل بيانات P2P…' : 'Loading P2P data…'}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !snapshot) {
+    return (
+      <div className="tracker-root" style={{ padding: 10 }}>
+        <div className="empty">
+          <div className="empty-t">{error}</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {sandboxMode ? 'Sandbox mode is enabled.' : 'No synthetic fallback is used in this environment.'}
+          </div>
         </div>
       </div>
     );
@@ -195,6 +208,9 @@ export default function P2PTrackerPage() {
         <button className="btn" onClick={load} disabled={loading} style={{ gap: 6 }}>
           <span>🔄</span> {t.lang === 'ar' ? 'تحديث' : 'Refresh'}
         </button>
+        {sandboxMode && (
+          <span className="pill warn">Sandbox synthetic data</span>
+        )}
         {lastUpdate && (
           <span className="muted" style={{ fontSize: 11 }}>
             {t.lang === 'ar' ? 'آخر تحديث' : 'Updated'} {new Date(lastUpdate).toLocaleTimeString()}

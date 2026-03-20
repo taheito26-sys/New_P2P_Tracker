@@ -22,6 +22,16 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MerchantRelationship, MerchantMessage, MerchantDeal, MerchantApproval } from '@/types/domain';
+import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
+
+export default function RelationshipWorkspace() {
+  if (!isSandboxDataEnabled()) {
+    return <SandboxOnlyNotice title="Relationship sandbox data is disabled" description="Synthetic relationship workspace data is available only in local development sandbox mode." />;
+  }
+
+  return <RelationshipWorkspaceSandbox />;
+}
 
 /* ─── Helpers ─── */
 function dealStatusStyle(status: string) {
@@ -41,7 +51,7 @@ function dealStatusStyle(status: string) {
    No tabs. Deals table = main content. Approvals = alert bars.
    Chat = collapsible bottom drawer (rare usage).
    ═══════════════════════════════════════════════════════════ */
-export default function RelationshipWorkspace() {
+function RelationshipWorkspaceSandbox() {
   const { id } = useParams<{ id: string }>();
   const { userId } = useAuth();
   const { settings } = useTheme();

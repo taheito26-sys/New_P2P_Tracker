@@ -46,10 +46,14 @@ Worker API runs via Wrangler and is proxied through Vite at `/api`.
 
 ## Frontend and auth configuration
 
-- `VITE_API_BASE_URL` is optional. If omitted, the frontend uses same-origin requests.
-- `VITE_ENABLE_DEMO_MODE=true` only enables demo fallback in development builds. Production builds ignore it.
-- Login uses an `HttpOnly` session cookie. The frontend no longer depends on receiving reusable session tokens from the API.
-- Password reset and email verification are intentionally fenced unless a real backend email flow is implemented.
+Demo and synthetic sandbox data are disabled by default in production builds. For explicit local development-only sandbox behavior, set:
+
+```sh
+VITE_ENABLE_DEMO_MODE=true
+VITE_ENABLE_SANDBOX_DATA=true
+```
+
+Also set `vars.APP_ENV` to `development` locally and `production` in deployed environments so synthetic worker-side P2P data is disabled outside sandbox use.
 
 ## Validation
 
