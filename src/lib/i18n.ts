@@ -750,7 +750,7 @@ const translations = {
   customDeal: { en: 'Custom Agreement', ar: 'اتفاقية مخصصة' },
   confirmDeleteDeal: { en: 'Are you sure you want to delete this agreement?', ar: 'هل أنت متأكد أنك تريد حذف هذه الاتفاقية؟' },
   dealCancelled: { en: 'Agreement cancelled', ar: 'تم إلغاء الاتفاقية' },
-  deletedSuccessfully: { en: 'Deleted successfully', ar: 'تم الحذف بنجاح' },
+  deletedSuccessfully: { en: 'Agreement deleted permanently', ar: 'تم حذف الاتفاقية نهائياً' },
   deleteDealWarning: { en: 'This will permanently delete this deal. This action cannot be undone.', ar: 'سيتم حذف هذه الصفقة نهائياً. لا يمكن التراجع عن هذا الإجراء.' },
   editDealTitle: { en: 'Edit Agreement', ar: 'تعديل الاتفاقية' },
   dealTitleLabel: { en: 'Title', ar: 'العنوان' },

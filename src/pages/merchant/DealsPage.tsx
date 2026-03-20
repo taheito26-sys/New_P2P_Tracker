@@ -84,7 +84,7 @@ export default function DealsPage() {
   const confirmDelete = async () => {
     if (!deleteDealId) return;
     try {
-      await dealsApi.delete(deleteDealId);
+      await dealsApi.deletePermanent(deleteDealId);
       await reload();
       setDeleteDealId(null);
       setEditingDeal(null);

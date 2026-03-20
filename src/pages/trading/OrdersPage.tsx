@@ -27,7 +27,7 @@ function toInputFromTs(ts: number) { return new Date(ts).toISOString().slice(0, 
 function OrdersPageWorkspace() {
   const { settings } = useTheme();
   const { userId } = useAuth();
-  const actorId = userId || 'governance-blocked-actor';
+  const actorId = userId || 'demo-user';
   const t = useT();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -770,45 +770,6 @@ function OrdersPageWorkspace() {
                   <div className="empty-t">{t('noIncomingTrades')}</div>
                   <div className="empty-s">{t('incomingTradeRequestsDesc')}</div>
                 </div>
-              ) : isMobile ? (
-                <div className="mobileCardList">
-                  {incomingTradeRequests.map(tr => {
-                    const rel = relationships.find(r => r.id === tr.linkedRelId);
-                    const tmpl = AGREEMENT_TEMPLATES.find(template => template.id === tr.agreementTemplateId);
-                    const rev = tr.amountUSDT * tr.sellPriceQAR;
-                    return (
-                      <div key={tr.id} className="mobileDataCard">
-                        <div className="mobileDataHead">
-                          <div>
-                            <div className="mobileDataTitle">{rel?.counterparty?.display_name || tr.linkedMerchantId || '—'}</div>
-                            <div className="mobileDataMeta"><span className="mono">{fmtDate(tr.ts)}</span></div>
-                          </div>
-                          <span className="pill" style={{ fontSize: 8, color: 'var(--brand)' }}>{tmpl ? `${tmpl.label[t.lang]} (${tmpl.ratioDisplay})` : t('agreementType')}</span>
-                        </div>
-                        <div className="mobileDataGrid">
-                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('qty')}</div><div className="mobileDataValue mono">{fmtU(tr.amountUSDT)}</div></div>
-                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('sell')}</div><div className="mobileDataValue mono">{fmtP(tr.sellPriceQAR)}</div></div>
-                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('volume')}</div><div className="mobileDataValue mono">{fmtQ(rev)}</div></div>
-                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('actions')}</div><div className="mobileDataValue">{tr.approvalStatus}</div></div>
-                        </div>
-                        <div className="actionsRow" style={{ marginTop: 8 }}>
-                          {tr.approvalStatus === 'pending_approval' && (
-                            <>
-                              <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={() => approveIncomingTrade(tr.id)}>{t('approve')}</button>
-                              <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => rejectIncomingTrade(tr.id)}>{t('reject')}</button>
-                            </>
-                          )}
-                          {tr.approvalStatus === 'cancellation_pending' && (
-                            <>
-                              <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={() => approveCancellation(tr.id)}>{t('approveCancellationAction')}</button>
-                              <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => rejectCancellation(tr.id)}>{t('rejectCancellationAction')}</button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
               ) : (
                 <div className="tableWrap ledgerWrap">
                   <table>
@@ -1388,7 +1349,7 @@ function OrdersPageWorkspace() {
                 </div>
               </div>
 
-              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 {!isLockedTrade && (
                   <button
                     onClick={deleteTrade}
