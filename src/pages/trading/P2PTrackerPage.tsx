@@ -162,7 +162,7 @@ export default function P2PTrackerPage() {
 
   if (loading && !snapshot && !error) {
     return (
-      <div className="tracker-root" style={{ padding: 10 }}>
+      <div className="tracker-root app-page-shell">
         <div className="empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <div className="empty-t">{t.lang === 'ar' ? 'جاري تحميل بيانات P2P…' : 'Loading P2P data…'}</div>
@@ -173,7 +173,7 @@ export default function P2PTrackerPage() {
 
   if (error && !snapshot) {
     return (
-      <div className="tracker-root" style={{ padding: 10 }}>
+      <div className="tracker-root app-page-shell">
         <div className="empty">
           <div className="empty-t">{error}</div>
           <div className="muted" style={{ fontSize: 12 }}>
@@ -189,7 +189,7 @@ export default function P2PTrackerPage() {
   const ccy = currentMarket.currency;
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 10 }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
       {/* ── Status Bar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         {/* Market selector */}
