@@ -1026,11 +1026,11 @@ merchant.delete('/deals/:id', async (c) => {
   ]);
 
   if (settlement || profit) {
-    return c.json({ error: 'Deal cannot be deleted once settlement or profit records exist' }, 409);
+    return c.json({ error: 'Deal cannot be deleted because settlement or profit records already exist. Keep the deal for history and review those records instead.' }, 409);
   }
 
   if (pendingCloseApproval) {
-    return c.json({ error: 'Deal cannot be deleted while a close approval request is still pending' }, 409);
+    return c.json({ error: 'Deal cannot be deleted while a close approval request is still pending. Resolve the approval first, then retry if the deal is still deletable.' }, 409);
   }
 
   await c.env.DB.prepare('DELETE FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ?').bind('deal', deal.id).run();

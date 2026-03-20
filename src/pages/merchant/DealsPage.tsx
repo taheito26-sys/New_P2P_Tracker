@@ -21,6 +21,13 @@ function canDeleteDeal(deal: MerchantDeal): boolean {
   return deal.status === 'pending' && deal.realized_pnl == null && !deal.close_date;
 }
 
+function getDeleteLockReason(deal: MerchantDeal): string {
+  if (deal.realized_pnl != null) return 'History recorded';
+  if (deal.close_date) return 'Already closed';
+  if (deal.status === 'approved') return 'Approved deal';
+  return 'Locked';
+}
+
 export default function DealsPage() {
   const { userId } = useAuth();
   const t = useT();
@@ -91,7 +98,7 @@ export default function DealsPage() {
       toast.success(t('deletedSuccessfully'));
     } catch (err: any) {
       if (err?.status === 409) {
-        toast.error('This deal can no longer be deleted because related approvals or settlement records already exist.');
+        toast.error(err?.message || 'This deal can no longer be deleted. Review any linked settlement, profit, or approval records instead.');
         return;
       }
       toast.error(err.message);
@@ -193,7 +200,7 @@ export default function DealsPage() {
                               {t('delete')}
                             </button>
                           ) : (
-                            <span className="text-xs text-muted-foreground">Locked</span>
+                            <span className="text-xs text-muted-foreground">{getDeleteLockReason(deal)}</span>
                           )}
                         </div>
                       </td>
@@ -295,7 +302,7 @@ export default function DealsPage() {
                 {t('delete')}
               </button>
             ) : (
-              <span className="text-xs text-muted-foreground">Deletion is available only while the deal is still pending and untouched.</span>
+              <span className="text-xs text-muted-foreground">Deletion is available only while the deal is still pending and has no recorded history.</span>
             )}
             <div className="flex gap-2 ml-auto">
               <button
