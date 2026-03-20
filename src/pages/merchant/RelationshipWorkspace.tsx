@@ -11,9 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { CreateDealDialog } from '@/components/deals/CreateDealDialog';
 import { DEAL_TYPE_CONFIGS, calculateOutstanding } from '@/lib/deal-engine';
+import { normalizeDealStatus } from '@/lib/merchant-deal-status';
 import { useRealtimeRefresh } from '@/hooks/use-realtime';
 import {
   Loader2, Send, Users, Briefcase, DollarSign, CheckSquare,
@@ -31,12 +32,8 @@ export default function RelationshipWorkspace() {
 /* ─── Helpers ─── */
 function dealStatusStyle(status: string) {
   switch (status) {
-    case 'active': return 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30';
-    case 'due': return 'bg-amber-500/10 text-amber-600 border border-amber-500/30';
-    case 'overdue': return 'bg-red-500/10 text-red-500 border border-red-500/30';
-    case 'settled': return 'bg-blue-500/10 text-blue-600 border border-blue-500/30';
-    case 'draft': return 'bg-muted text-muted-foreground border border-border';
-    case 'closed': return 'bg-muted text-muted-foreground border border-border';
+    case 'approved': return 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30';
+    case 'pending': return 'bg-amber-500/10 text-amber-600 border border-amber-500/30';
     default: return 'bg-muted text-muted-foreground border border-border';
   }
 }
@@ -135,7 +132,7 @@ function RelationshipWorkspaceCore() {
   };
 
   const handleAcceptDeal = async (dealId: string) => {
-    try { await api.deals.update(dealId, { status: 'active' }); toast.success('Deal accepted'); await reload(); }
+    try { await api.deals.update(dealId, { status: 'approved' }); toast.success('Deal approved'); await reload(); }
     catch (err: any) { toast.error(err.message); }
   };
 
@@ -148,11 +145,9 @@ function RelationshipWorkspaceCore() {
   const handleRejectDeal = async () => {
     try {
       const note = [rejectForm.note, rejectForm.suggested_amount ? `Suggested amount: $${rejectForm.suggested_amount}` : '', rejectForm.suggested_share_pct ? `Suggested profit share: ${rejectForm.suggested_share_pct}%` : ''].filter(Boolean).join(' | ');
-      await api.deals.update(rejectDealId, { status: 'cancelled' });
-      if (id && note) await api.messages.send(id, `⚠️ Deal rejected with counter-proposal:\n${note}`, 'system');
-      toast.success('Deal rejected — counter-proposal sent');
+      if (id && note) await api.messages.send(id, `⚠️ Deal feedback:\n${note}`, 'system');
+      toast.success('Counter-proposal sent');
       setRejectDealOpen(false);
-      await reload();
     } catch (err: any) { toast.error(err.message); }
   };
 
@@ -166,16 +161,26 @@ function RelationshipWorkspaceCore() {
 
   const settlingDeal = relDeals.find(d => d.id === settleDealId);
   const isPartnershipSettle = settlingDeal?.deal_type === 'partnership';
+  const parsedSettlementAmount = Number.parseFloat(settlementForm.amount);
+  const parsedProfitAmount = Number.parseFloat(settlementForm.profit);
+  const canSubmitSettlement = isPartnershipSettle
+    ? parsedProfitAmount > 0
+    : parsedSettlementAmount > 0;
 
   const handleSubmitSettlement = async () => {
-    if (!settlementForm.amount || submittingSettlement || settlementSubmitLock.current) return;
+    if (!canSubmitSettlement || submittingSettlement || settlementSubmitLock.current) {
+      if (!submittingSettlement && !settlementSubmitLock.current) {
+        toast.error(isPartnershipSettle ? 'Enter a positive profit amount before submitting.' : 'Enter a positive settlement amount before submitting.');
+      }
+      return;
+    }
     settlementSubmitLock.current = true;
     setSubmittingSettlement(true);
     try {
-      const settleAmount = isPartnershipSettle ? 0 : parseFloat(settlementForm.amount);
+      const settleAmount = isPartnershipSettle ? 0 : parsedSettlementAmount;
       await api.deals.submitSettlement(settleDealId, { amount: settleAmount, note: settlementForm.note });
-      if (settlementForm.profit && parseFloat(settlementForm.profit) > 0) {
-        await api.deals.recordProfit(settleDealId, { amount: parseFloat(settlementForm.profit), period_key: settlementForm.period_key, note: settlementForm.note });
+      if (parsedProfitAmount > 0) {
+        await api.deals.recordProfit(settleDealId, { amount: parsedProfitAmount, period_key: settlementForm.period_key, note: settlementForm.note });
       }
       await api.deals.close(settleDealId, { note: isPartnershipSettle ? 'Profit-share deal closed — capital retained by merchant' : 'Auto-closed on settlement submission' });
       toast.success('Settlement submitted — deal will close once approved');
@@ -202,12 +207,11 @@ function RelationshipWorkspaceCore() {
 
   const pendingApprovals = relApprovals.filter(a => a.status === 'pending');
   const unreadMsgs = msgs.filter(m => !m.is_read && m.sender_user_id !== userId);
-  const activeDeals = relDeals.filter(d => ['active', 'due', 'overdue'].includes(d.status));
+  const activeDeals = relDeals.filter(d => normalizeDealStatus(d.status) === 'approved');
   const counterpartyName = rel.counterparty?.display_name || t('workspace');
 
   const exposure = rel.summary?.activeExposure || 0;
   const realizedPnl = rel.summary?.realizedProfit || 0;
-  const overdueCount = relDeals.filter(d => d.status === 'overdue').length;
 
   return (
     <div dir={t.isRTL ? 'rtl' : 'ltr'} className="flex flex-col h-[calc(100vh-3.5rem)] border border-border/50 rounded-xl overflow-hidden bg-card mx-1 my-1">
@@ -276,17 +280,10 @@ function RelationshipWorkspaceCore() {
             {realizedPnl >= 0 ? '+' : ''}${realizedPnl.toLocaleString()}
           </p>
         </div>
-        {overdueCount > 0 ? (
-          <div className="px-3 py-2 rounded-lg bg-red-500/10">
-            <p className="text-[11px] text-red-500">{t('overdue')}</p>
-            <p className="text-xl font-medium leading-tight mt-0.5 text-red-500">{overdueCount}</p>
-          </div>
-        ) : (
-          <div className="px-3 py-2 rounded-lg bg-secondary">
-            <p className="text-[11px] text-muted-foreground">{t('pendingApprovalsLabel')}</p>
-            <p className="text-xl font-medium leading-tight mt-0.5">{pendingApprovals.length}</p>
-          </div>
-        )}
+        <div className="px-3 py-2 rounded-lg bg-secondary">
+          <p className="text-[11px] text-muted-foreground">{t('pendingApprovalsLabel')}</p>
+          <p className="text-xl font-medium leading-tight mt-0.5">{pendingApprovals.length}</p>
+        </div>
       </div>
 
       {/* ─── APPROVAL ALERT BARS (only when pending) ─── */}
@@ -340,14 +337,11 @@ function RelationshipWorkspaceCore() {
                 const outstandingVal = calculateOutstanding(deal);
                 return (
                   <tr key={deal.id} className="border-b border-border/50 hover:bg-secondary/50 transition-colors relative">
-                    {deal.status === 'overdue' && <td className="absolute left-0 top-0 bottom-0 w-[3px] bg-red-500 rounded-r-sm p-0" />}
-                    {deal.status === 'due' && <td className="absolute left-0 top-0 bottom-0 w-[3px] bg-amber-500 rounded-r-sm p-0" />}
 
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-7 h-7 rounded-md flex items-center justify-center text-sm shrink-0 ${
-                          deal.status === 'overdue' ? 'bg-red-500/10' :
-                          ['active', 'due'].includes(deal.status) ? 'bg-emerald-500/10' : 'bg-secondary'
+                          normalizeDealStatus(deal.status) === 'approved' ? 'bg-emerald-500/10' : 'bg-secondary'
                         }`}>{cfg?.icon || '📋'}</div>
                         <div>
                           <div className="flex items-center gap-1.5">
@@ -365,7 +359,7 @@ function RelationshipWorkspaceCore() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${dealStatusStyle(deal.status)}`}>{deal.status}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${dealStatusStyle(normalizeDealStatus(deal.status))}`}>{normalizeDealStatus(deal.status)}</span>
                     </td>
                     <td className="px-4 py-2.5 text-[12px] text-muted-foreground whitespace-nowrap">
                       {deal.issue_date}{deal.due_date ? ` → ${deal.due_date}` : ''}
@@ -383,13 +377,13 @@ function RelationshipWorkspaceCore() {
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="flex gap-1 justify-end">
-                        {deal.status === 'draft' && (
+                        {normalizeDealStatus(deal.status) === 'pending' && (
                           <>
-                            <button onClick={() => handleAcceptDeal(deal.id)} className="px-2 py-1 rounded-md text-[11px] font-medium border border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 transition-colors flex items-center gap-1"><Check className="w-3 h-3" /> Accept</button>
-                            <button onClick={() => openRejectDeal(deal)} className="px-2 py-1 rounded-md text-[11px] border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors"><X className="w-3 h-3" /></button>
+                            <button onClick={() => handleAcceptDeal(deal.id)} className="px-2 py-1 rounded-md text-[11px] font-medium border border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 transition-colors flex items-center gap-1"><Check className="w-3 h-3" /> Approve</button>
+                            <button onClick={() => openRejectDeal(deal)} className="px-2 py-1 rounded-md text-[11px] border border-amber-500/30 text-amber-600 hover:bg-amber-500/10 transition-colors"><MessageCircle className="w-3 h-3" /></button>
                           </>
                         )}
-                        {['active', 'due', 'overdue'].includes(deal.status) && (
+                        {normalizeDealStatus(deal.status) === 'approved' && (
                           <TooltipProvider delayDuration={200}>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -461,7 +455,9 @@ function RelationshipWorkspaceCore() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Settle & Close Deal</DialogTitle>
-            <p className="text-sm text-muted-foreground mt-1">Submit the capital return and profit. Once the counterparty approves, the deal closes automatically.</p>
+            <DialogDescription>
+              Submit the capital return and profit. Once the counterparty approves, the deal closes automatically.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {isPartnershipSettle ? (
@@ -487,7 +483,7 @@ function RelationshipWorkspaceCore() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSettlementOpen(false)} disabled={submittingSettlement}>{t('cancel')}</Button>
-            <Button onClick={handleSubmitSettlement} disabled={submittingSettlement}>
+            <Button onClick={handleSubmitSettlement} disabled={submittingSettlement || !canSubmitSettlement}>
               {submittingSettlement ? 'Submitting...' : t('submitForApproval')}
             </Button>
           </DialogFooter>
@@ -498,7 +494,9 @@ function RelationshipWorkspaceCore() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><X className="w-4 h-4 text-red-500" /> Reject Deal</DialogTitle>
-            <p className="text-sm text-muted-foreground mt-1">Reject and suggest changes.</p>
+            <DialogDescription>
+              Send feedback and propose revised terms without forcing the deal into a hidden legacy status.
+            </DialogDescription>
           </DialogHeader>
           {rejectDealData && (
             <div className="space-y-4 py-2">
