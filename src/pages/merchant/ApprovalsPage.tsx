@@ -49,11 +49,11 @@ export default function ApprovalsPage() {
   };
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('approvals')} description={t('manageInvites')} />
-      <div className="p-6">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('approvals')} description={t('manageInvites')} />
         <Tabs defaultValue="inbox">
-          <TabsList>
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2">
             <TabsTrigger value="inbox">{t('toReview')} ({inbox.filter(a => a.status === 'pending').length})</TabsTrigger>
             <TabsTrigger value="sent">{t('submitted')} ({sent.length})</TabsTrigger>
           </TabsList>
@@ -68,7 +68,7 @@ export default function ApprovalsPage() {
             )}
             {inbox.map(a => (
               <Card key={a.id} className="glass">
-                <CardContent className="flex items-center justify-between p-4">
+                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{a.type.replace(/_/g, ' ')}</p>
@@ -79,7 +79,7 @@ export default function ApprovalsPage() {
                     </p>
                   </div>
                   {a.status === 'pending' && (
-                    <div className="flex gap-2">
+                    <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
                       <Button size="sm" onClick={() => handleApprove(a.id)} className="gap-1"><Check className="w-3.5 h-3.5" /> {t('approve')}</Button>
                       <Button size="sm" variant="outline" onClick={() => handleReject(a.id)} className="gap-1"><X className="w-3.5 h-3.5" /> {t('reject')}</Button>
                     </div>
@@ -92,7 +92,7 @@ export default function ApprovalsPage() {
           <TabsContent value="sent" className="mt-4 space-y-3">
             {sent.map(a => (
               <Card key={a.id} className="glass">
-                <CardContent className="flex items-center justify-between p-4">
+                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{a.type.replace(/_/g, ' ')}</p>

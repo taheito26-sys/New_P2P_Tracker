@@ -84,7 +84,7 @@ function DashboardPageSandbox() {
   };
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       {/* KPI Bands */}
       <div className="kpi-band-grid">
         <div className="kpi-band">
@@ -263,7 +263,7 @@ function DashboardPageSandbox() {
       </div>
 
       {/* Chart panels */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div className="splitGrid2" style={{ gap: 8 }}>
         <div className="panel">
           <div className="panel-head"><h2>{t('netProfitPerTrade')}</h2><span className="pill muted">{t('allTime')}</span></div>
           <div className="panel-body" style={{ height: 170, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

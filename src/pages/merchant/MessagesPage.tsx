@@ -60,9 +60,10 @@ export default function MessagesPage() {
   const totalUnread = useMemo(() => conversations.reduce((s, c) => s + c.unreadCount, 0), [conversations]);
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('messagesLabel')} description={`${t('messagesAcrossRels')}${totalUnread > 0 ? ` · ${totalUnread} ${t('unread')}` : ''}`} />
-      <div className="p-6 space-y-3">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('messagesLabel')} description={`${t('messagesAcrossRels')}${totalUnread > 0 ? ` · ${totalUnread} ${t('unread')}` : ''}`} />
+        <div className="space-y-3">
         {conversations.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -73,7 +74,7 @@ export default function MessagesPage() {
         {conversations.map(convo => (
           <Link key={convo.relationshipId} to={`/network/relationships/${convo.relationshipId}`}>
             <Card className="glass hover:border-primary/50 transition-colors cursor-pointer">
-              <CardContent className="flex items-center justify-between p-4">
+              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <Users className="w-5 h-5 text-primary" />
@@ -95,7 +96,7 @@ export default function MessagesPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0 ml-3">
+                <div className="flex items-center gap-3 shrink-0 sm:ml-3">
                   {convo.lastMessage && (
                     <span className="text-[10px] text-muted-foreground whitespace-nowrap">
                       {new Date(convo.lastMessage.created_at).toLocaleDateString()}
@@ -107,6 +108,7 @@ export default function MessagesPage() {
             </Card>
           </Link>
         ))}
+        </div>
       </div>
     </div>
   );
