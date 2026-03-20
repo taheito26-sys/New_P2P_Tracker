@@ -98,6 +98,16 @@
 .tracker-root .panel-head { padding: 10px 12px 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg,rgba(255,255,255,.02),transparent); }
 .tracker-root .panel-head h2 { margin: 0; font-size: calc(11px * var(--ui-scale,1)); font-weight: 700; }
 .tracker-root .panel-body { padding: 12px; }
+.tracker-root .panel,
+.tracker-root .panel-head,
+.tracker-root .panel-body,
+.tracker-root .formPanel,
+.tracker-root .previewBox,
+.tracker-root .bannerRow,
+.tracker-root .modeToggle,
+.tracker-root .inputBox,
+.tracker-root .lookupShell,
+.tracker-root .lookupBox { min-width: 0; max-width: 100%; box-sizing: border-box; }
 
 /* ── PILLS ── */
 .tracker-root .pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--muted); font-size: calc(10px * var(--ui-scale,1)); white-space: nowrap; transition: all var(--lt-tr); }
@@ -249,6 +259,9 @@
 }
 .tracker-root .sideAction:hover { border-color: var(--brand); color: var(--brand); background: var(--brand3); }
 .tracker-root .actionsRow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tracker-root .mobileTabBar { display: flex; gap: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.tracker-root .mobileTabBar::-webkit-scrollbar { display: none; }
+.tracker-root .mobileTabBar > button { flex: 0 0 auto; }
 .tracker-root .tradeDetail { background: var(--panel2); border-radius: var(--lt-radius-sm); padding: 10px; margin: 4px; border: 1px solid var(--line2); }
 .tracker-root .prog.neg > span { background: linear-gradient(90deg, var(--bad), var(--warn)); }
 
@@ -436,6 +449,12 @@
   .tracker-root .dash-bottom { grid-template-columns: 1fr; }
   .tracker-root .g2tight { grid-template-columns: 1fr; }
   .tracker-root .splitGrid2 { grid-template-columns: 1fr; }
+  .tracker-root .panel-head,
+  .tracker-root .bannerRow,
+  .tracker-root .prev-row { flex-wrap: wrap; align-items: flex-start; }
+  .tracker-root .modeToggle { flex-wrap: wrap; }
+  .tracker-root .modeToggle button { min-width: 0; }
+  .tracker-root .tradeBuyerChip { max-width: 110px; }
   .tracker-root .cal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tracker-root .cal-grid { gap: 2px; }
   .tracker-root .cal-day { min-height: 52px; }

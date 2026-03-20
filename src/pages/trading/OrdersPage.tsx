@@ -564,7 +564,7 @@ function OrdersPageSandbox() {
     <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
 
       {/* ─── TAB BAR ─── */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
+      <div className="mobileTabBar" style={{ borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
         {(['my', 'incoming', 'outgoing'] as const).map(tab => (
           <button
             key={tab}
@@ -600,7 +600,7 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: myKpi.count, qty: myKpi.qty, vol: myKpi.vol, net: myKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>{t('trades')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('fifoCostBasisMargin')}</div>
@@ -716,7 +716,7 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: inKpi.count, vol: inKpi.vol, net: inKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>📥 {t('incomingTradeRequestsTitle')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('incomingTradesHelp')}</div>
@@ -782,7 +782,7 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: outKpi.count, qty: outKpi.qty, vol: outKpi.vol, net: outKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>📤 {t('outgoingOrders')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('yourMerchantLinkedTrades')}</div>
@@ -1258,7 +1258,7 @@ function OrdersPageSandbox() {
                 </div>
               </div>
 
-              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
                 {!isLockedTrade && (
                   <button
                     onClick={deleteTrade}
@@ -1267,7 +1267,7 @@ function OrdersPageSandbox() {
                     {t('delete')}
                   </button>
                 )}
-                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap', width: '100%', justifyContent: 'flex-end' }}>
                   <button className="btn secondary" style={{ minWidth: 80 }} onClick={() => setEditingTradeId(null)}>{t('cancel')}</button>
                   {!isLockedTrade && (
                     <button
