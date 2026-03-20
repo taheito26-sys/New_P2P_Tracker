@@ -247,15 +247,15 @@ function StockPageSandbox() {
   };
 
   return (
-    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className={`tracker-root app-page-shell tracker-mobile-screen ${isMobile ? 'tracker-mobile-screen--phone' : ''}`} dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       <div className="twoColPage">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+          <div className={`tracker-section-head ${isMobile ? 'tracker-section-head--mobile' : ''}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 800 }}>{t('batches')}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('fifoProgress')}</div>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div className={`tracker-section-actions ${isMobile ? 'tracker-section-actions--mobile' : ''}`} style={{ display: 'flex', gap: 6 }}>
               <span className="pill">{rLabel}</span>
             </div>
           </div>
@@ -269,7 +269,7 @@ function StockPageSandbox() {
               <div className="empty-s">{t('addFirstPurchase')}</div>
             </div>
           ) : isMobile ? (
-            <div className="mobileCardList">
+            <div className="mobileCardList tracker-mobile-card-list">
               {perf.map((b) => {
                 const rem = Number.isFinite(b.remaining) ? b.remaining : b.initialUSDT;
                 const pct = b.initialUSDT > 0 ? rem / b.initialUSDT : 0;
@@ -278,7 +278,7 @@ function StockPageSandbox() {
                 const st = rem <= 1e-9 ? t('depleted') : rem < b.initialUSDT ? t('partial') : t('fresh');
                 const stCls = rem <= 1e-9 ? 'bad' : rem < b.initialUSDT ? 'warn' : 'good';
                 return (
-                  <div key={b.id} className="mobileDataCard">
+                  <div key={b.id} className={`mobileDataCard ${isMobile ? 'mobileDataCard--ledger' : ''}`}>
                     <div className="mobileDataHead">
                       <div>
                         <div className="mobileDataTitle">{b.source || '—'}</div>
@@ -406,11 +406,11 @@ function StockPageSandbox() {
         </div>
 
         <div>
-          <div className="formPanel salePanel">
+          <div className={`formPanel salePanel ${isMobile ? 'tracker-form-panel--mobile' : ''}`}>
             <div className="hdr">{t('addBatchTitle')}</div>
             <div className="inner">
               {wacop && (
-                <div className="bannerRow">
+                <div className={`bannerRow ${isMobile ? 'bannerRow--mobile' : ''}`}>
                   <span className="bLbl">{t('currentAvPrice')}</span>
                   <span className="bVal">{fmtP(wacop)}</span>
                   <span className="bSpacer" />
@@ -423,7 +423,7 @@ function StockPageSandbox() {
               </div>
               <div className="field2">
                 <div className="lbl">{t('currencyMode')}</div>
-                <div className="modeToggle">
+                <div className={`modeToggle ${isMobile ? 'modeToggle--mobile' : ''}`}>
                   <button className={batchMode === 'QAR' ? 'active' : ''} type="button" onClick={() => setBatchMode('QAR')}>📦 QAR</button>
                   <button className={batchMode === 'USDT' ? 'active' : ''} type="button" onClick={() => setBatchMode('USDT')}>💲 USDT</button>
                 </div>
@@ -440,8 +440,8 @@ function StockPageSandbox() {
               </div>
               <div className="field2" style={{ gridColumn: 'span 2' }}>
                 <div className="lbl">{t('supplier')}</div>
-                <div className="lookupShell">
-                  <div className="inputBox lookupBox" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div className={`lookupShell ${isMobile ? 'lookupShell--mobile' : ''}`}>
+                  <div className={`inputBox lookupBox ${isMobile ? 'lookupBox--mobile' : ''}`} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       placeholder={t('searchOrTypeSupplier')}
                       autoComplete="off"
@@ -517,7 +517,7 @@ function StockPageSandbox() {
                 <div className="inputBox"><input placeholder={t('optionalNote')} value={batchNote} onChange={(e) => setBatchNote(e.target.value)} /></div>
               </div>
 
-              <div className="formActions"><button className="btn" onClick={addBatch}>{t('addBatchTitle')}</button></div>
+              <div className={`formActions ${isMobile ? 'formActions--mobile' : ''}`}><button className={`btn ${isMobile ? 'btn--mobile-primary' : ''}`} onClick={addBatch}>{t('addBatchTitle')}</button></div>
               <div className={`msg ${batchMsg.includes(t('fixFields')) ? 'bad' : ''}`}>{batchMsg}</div>
             </div>
           </div>

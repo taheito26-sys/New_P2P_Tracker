@@ -46,14 +46,14 @@ Worker API runs via Wrangler and is proxied through Vite at `/api`.
 
 ## Frontend and auth configuration
 
-Demo and synthetic sandbox data are disabled by default in production builds. For explicit local development-only sandbox behavior, set:
+Synthetic sandbox data is blocked by governance policy unless you explicitly enable both flags for a localhost-only development session. For that narrow local workflow, set:
 
 ```sh
 VITE_ENABLE_DEMO_MODE=true
 VITE_ENABLE_SANDBOX_DATA=true
 ```
 
-Also set `vars.APP_ENV` to `development` locally and `production` in deployed environments so synthetic worker-side P2P data is disabled outside sandbox use.
+The frontend now requires **both** flags and a localhost origin before any synthetic generators can run, and the Worker should still use `vars.APP_ENV=development` only for local testing while remaining `production` in deployed environments.
 
 ## Validation
 
@@ -67,7 +67,7 @@ npm run lint
 ## Deploy
 
 1. Apply D1 migrations to the target environment.
-2. Configure KV, D1, `APP_ENV=production`, and set `ALLOWED_ORIGINS` only when your frontend is hosted on a separate trusted origin.
+2. Configure KV, D1, `APP_ENV=production`, and set `ALLOWED_ORIGINS` only when your frontend is hosted on a separate trusted origin. Synthetic/demo data should remain disabled in deployed environments.
 3. Deploy the Worker:
 
 ```sh

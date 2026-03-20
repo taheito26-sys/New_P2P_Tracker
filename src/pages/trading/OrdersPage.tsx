@@ -33,7 +33,7 @@ function toInputFromTs(ts: number) { return new Date(ts).toISOString().slice(0, 
 function OrdersPageSandbox() {
   const { settings } = useTheme();
   const { userId } = useAuth();
-  const actorId = userId || 'demo-user';
+  const actorId = userId || 'governance-blocked-actor';
   const t = useT();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -554,7 +554,7 @@ function OrdersPageSandbox() {
   }, [incomingTradeRequests, derived]);
 
   const renderKpiBar = (kpi: { count: number; qty?: number; vol: number; net: number }) => (
-    <div style={{ display: 'flex', gap: 16, padding: '8px 12px', background: 'color-mix(in srgb, var(--brand) 5%, transparent)', borderRadius: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+    <div className={`tracker-kpi-strip ${isMobile ? 'tracker-kpi-strip--mobile' : ''}`} style={{ display: 'flex', gap: 16, padding: '8px 12px', background: 'color-mix(in srgb, var(--brand) 5%, transparent)', borderRadius: 6, marginBottom: 10, flexWrap: 'wrap' }}>
       <div><div style={{ fontSize: 8, color: 'var(--muted)', fontWeight: 700, letterSpacing: '.5px' }}>{t('count').toUpperCase()}</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{kpi.count}</div></div>
       {kpi.qty != null && <div><div style={{ fontSize: 8, color: 'var(--muted)', fontWeight: 700, letterSpacing: '.5px' }}>USDT {t('qty').toUpperCase()}</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmtU(kpi.qty)}</div></div>}
       <div><div style={{ fontSize: 8, color: 'var(--muted)', fontWeight: 700, letterSpacing: '.5px' }}>{t('volume').toUpperCase()}</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmtQ(kpi.vol)}</div></div>
@@ -563,10 +563,10 @@ function OrdersPageSandbox() {
   );
 
   return (
-    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className={`tracker-root app-page-shell tracker-mobile-screen ${isMobile ? 'tracker-mobile-screen--phone' : ''}`} dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
 
       {/* ─── TAB BAR ─── */}
-      <div className="mobileTabBar" style={{ borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
+      <div className={`mobileTabBar ${isMobile ? 'tracker-mobile-tabbar' : ''}`} style={{ borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
         {(['my', 'incoming', 'outgoing'] as const).map(tab => (
           <button
             key={tab}
@@ -602,12 +602,12 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: myKpi.count, qty: myKpi.qty, vol: myKpi.vol, net: myKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+              <div className={`tracker-section-head ${isMobile ? 'tracker-section-head--mobile' : ''}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>{t('trades')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('fifoCostBasisMargin')}</div>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div className={`tracker-section-actions ${isMobile ? 'tracker-section-actions--mobile' : ''}`} style={{ display: 'flex', gap: 6 }}>
                   <span className="pill">{rLabel}</span>
                   <button className="btn secondary" onClick={exportCsv}>CSV</button>
                 </div>
@@ -620,7 +620,7 @@ function OrdersPageSandbox() {
                   <div className="empty-s">{t('addBatchThenSale')}</div>
                 </div>
               ) : isMobile ? (
-                <div className="mobileCardList">
+                <div className="mobileCardList tracker-mobile-card-list">
                   {filtered.map(tr => {
                     const c = derived.tradeCalc.get(tr.id);
                     const ok = !!c?.ok;
@@ -632,7 +632,7 @@ function OrdersPageSandbox() {
                     const linkedRel = isMerchantLinked ? relationships.find(r => r.id === tr.linkedRelId) : null;
                     const ownershipLabel = !isMerchantLinked ? t('selfTradeLabel') : (tr.createdByUserId || actorId) === actorId ? t('sentTradeLabel') : t('sharedTradeLabel');
                     return (
-                      <div key={tr.id} className="mobileDataCard">
+                      <div key={tr.id} className={`mobileDataCard ${isMobile ? 'mobileDataCard--ledger' : ''}`}>
                         <div className="mobileDataHead">
                           <div>
                             <div className="mobileDataTitle">{cn || '—'}</div>
@@ -1019,11 +1019,11 @@ function OrdersPageSandbox() {
 
           {/* ── MY ORDERS: New Sale Form ── */}
           {activeTab === 'my' && (
-            <div className="formPanel salePanel">
+            <div className={`formPanel salePanel ${isMobile ? 'tracker-form-panel--mobile' : ''}`}>
               <div className="hdr">{t('newSale')}</div>
               <div className="inner">
                 {wacop && (
-                  <div className="bannerRow">
+                  <div className={`bannerRow ${isMobile ? 'bannerRow--mobile' : ''}`}>
                     <span className="bLbl">{t('avPrice')}</span><span className="bVal">{fmtP(wacop)}</span><span className="bSpacer" /><span className="bPill">FIFO</span>
                   </div>
                 )}
@@ -1035,7 +1035,7 @@ function OrdersPageSandbox() {
 
                 <div className="field2">
                   <div className="lbl">{t('inputMode')}</div>
-                  <div className="modeToggle">
+                  <div className={`modeToggle ${isMobile ? 'modeToggle--mobile' : ''}`}>
                     <button className={saleMode === 'USDT' ? 'active' : ''} type="button" onClick={() => setSaleMode('USDT')}>💲 USDT</button>
                     <button className={saleMode === 'QAR' ? 'active' : ''} type="button" onClick={() => setSaleMode('QAR')}>📦 QAR</button>
                   </div>
@@ -1054,8 +1054,8 @@ function OrdersPageSandbox() {
 
                 <div className="field2">
                   <div className="lbl">{t('buyerName')} <span style={{ color: 'var(--bad)', fontWeight: 700 }}>*</span></div>
-                  <div className="lookupShell">
-                    <div className="inputBox lookupBox" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div className={`lookupShell ${isMobile ? 'lookupShell--mobile' : ''}`}>
+                    <div className={`inputBox lookupBox ${isMobile ? 'lookupBox--mobile' : ''}`} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <input placeholder={t('searchOrTypeBuyer')} style={{ flex: 1, paddingRight: 0 }} autoComplete="off" value={buyerName}
                         onFocus={() => setBuyerMenuOpen(true)}
                         onChange={e => { setBuyerName(e.target.value); setBuyerId(''); setBuyerMenuOpen(true); }}

@@ -504,3 +504,159 @@
   .tracker-root .cal-profit { font-size: calc(6px * var(--ui-scale,1)); }
   .tracker-root .cal-count { font-size: calc(5px * var(--ui-scale,1)); }
 }
+
+/* ── ORDERS/STOCK MOBILE TUNING ── */
+.tracker-root .tracker-kpi-strip { border: 1px solid color-mix(in srgb, var(--brand) 16%, var(--line)); box-shadow: var(--lt-shadow2); }
+.tracker-root .tracker-section-head { min-width: 0; }
+.tracker-root .tracker-section-actions { align-items: center; flex-wrap: wrap; }
+.tracker-root .tracker-mobile-card-list { gap: 12px; }
+.tracker-root .mobileDataCard--ledger { border-color: color-mix(in srgb, var(--brand) 16%, var(--line)); background: linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 92%, var(--brand3)), var(--card-bg)); }
+.tracker-root .tracker-form-panel--mobile { border-radius: 18px; border-color: color-mix(in srgb, var(--brand) 22%, var(--line)); box-shadow: 0 14px 28px rgba(0,0,0,.22); }
+.tracker-root .lookupBox--mobile { gap: 8px !important; }
+.tracker-root .btn--mobile-primary { min-height: 48px; justify-content: center; font-size: calc(13px * var(--ui-scale,1)); width: 100%; border-radius: 14px; }
+
+@media (max-width: 768px) {
+  .tracker-root.tracker-mobile-screen--phone { padding-bottom: 6px; }
+  .tracker-root .tracker-kpi-strip--mobile {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px !important;
+    padding: 12px !important;
+    border-radius: 14px !important;
+  }
+  .tracker-root .tracker-section-head--mobile {
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 10px !important;
+    margin-bottom: 10px !important;
+  }
+  .tracker-root .tracker-section-actions--mobile {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .tracker-root .tracker-section-actions--mobile > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .tracker-root .tracker-mobile-tabbar {
+    padding: 4px;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--card-bg) 90%, transparent);
+    margin-bottom: 8px !important;
+  }
+  .tracker-root .tracker-mobile-tabbar > button {
+    min-width: max-content;
+    border-radius: 12px;
+  }
+  .tracker-root .bannerRow--mobile {
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .tracker-root .bannerRow--mobile .bLbl { width: 100%; font-size: calc(12px * var(--ui-scale,1)); }
+  .tracker-root .bannerRow--mobile .bVal { font-size: calc(22px * var(--ui-scale,1)); }
+  .tracker-root .bannerRow--mobile .bPill { margin-left: auto; }
+  .tracker-root .modeToggle--mobile {
+    gap: 6px;
+    padding: 4px;
+    border-radius: 14px;
+  }
+  .tracker-root .modeToggle--mobile button {
+    min-height: 52px;
+    font-size: calc(16px * var(--ui-scale,1));
+    border-radius: 12px;
+  }
+  .tracker-root .tracker-form-panel--mobile .hdr {
+    padding: 12px 14px;
+    font-size: calc(12px * var(--ui-scale,1));
+    letter-spacing: 1px;
+  }
+  .tracker-root .tracker-form-panel--mobile .inner {
+    gap: 10px;
+    padding: 12px;
+  }
+  .tracker-root .tracker-form-panel--mobile .field2 .lbl {
+    font-size: calc(11px * var(--ui-scale,1));
+    letter-spacing: 1px;
+  }
+  .tracker-root .tracker-form-panel--mobile .inputBox {
+    padding: 12px 14px;
+    border-radius: 14px;
+  }
+  .tracker-root .tracker-form-panel--mobile .inputBox input,
+  .tracker-root .tracker-form-panel--mobile .inputBox textarea,
+  .tracker-root .tracker-form-panel--mobile select {
+    font-size: calc(16px * var(--ui-scale,1));
+  }
+  .tracker-root .tracker-form-panel--mobile .lookupBox--mobile {
+    padding-right: 8px;
+  }
+  .tracker-root .tracker-form-panel--mobile .sideAction {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    font-size: 20px;
+  }
+  .tracker-root .tracker-form-panel--mobile .lookupMenu {
+    border-radius: 14px;
+    max-height: 260px;
+  }
+  .tracker-root .tracker-form-panel--mobile .lookupItem {
+    min-height: 48px;
+    padding: 12px;
+    font-size: calc(13px * var(--ui-scale,1));
+  }
+  .tracker-root .tracker-form-panel--mobile .lookupHint,
+  .tracker-root .tracker-form-panel--mobile .msg {
+    font-size: calc(12px * var(--ui-scale,1));
+    line-height: 1.45;
+  }
+  .tracker-root .formActions--mobile {
+    width: 100%;
+    margin-top: 8px;
+  }
+  .tracker-root .formActions--mobile > * {
+    width: 100%;
+  }
+  .tracker-root .mobileDataCard--ledger {
+    padding: 12px;
+    border-radius: 16px;
+  }
+  .tracker-root .mobileDataCard--ledger .mobileDataHead {
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .tracker-root .mobileDataCard--ledger .mobileDataTitle {
+    font-size: calc(16px * var(--ui-scale,1));
+    line-height: 1.2;
+  }
+  .tracker-root .mobileDataCard--ledger .mobileDataMeta {
+    font-size: calc(11px * var(--ui-scale,1));
+    gap: 6px;
+  }
+  .tracker-root .mobileDataCard--ledger .mobileDataLabel {
+    font-size: calc(10px * var(--ui-scale,1));
+  }
+  .tracker-root .mobileDataCard--ledger .mobileDataValue {
+    font-size: calc(15px * var(--ui-scale,1));
+  }
+  .tracker-root .mobileDataCard--ledger .actionsRow {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .tracker-root .mobileDataCard--ledger .actionsRow .rowBtn {
+    justify-content: center;
+    min-height: 40px;
+    border-radius: 12px;
+    font-size: calc(12px * var(--ui-scale,1));
+  }
+}
+
+@media (max-width: 480px) {
+  .tracker-root .tracker-kpi-strip--mobile { grid-template-columns: 1fr; }
+  .tracker-root .tracker-section-actions--mobile { flex-direction: column; }
+  .tracker-root .tracker-section-actions--mobile > * { width: 100%; }
+  .tracker-root .mobileDataCard--ledger .actionsRow { grid-template-columns: 1fr; }
+}

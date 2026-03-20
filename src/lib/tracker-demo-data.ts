@@ -1,5 +1,6 @@
 // Demo data matching the TRACKER_CLOUDFLARE- repo state model
 import { getCurrentTrackerState } from './tracker-backup';
+import { assertSyntheticSandboxAccess } from '@/lib/governance';
 import { num, uid, type TrackerState, type Batch, type Trade, type Customer, computeFIFO, type DerivedState } from './tracker-helpers';
 
 const now = Date.now();
@@ -156,6 +157,7 @@ function loadStoredTrackerState(overrides?: DemoOverrides): TrackerState | null 
 }
 
 export function createDemoState(overrides?: DemoOverrides): { state: TrackerState; derived: DerivedState } {
+  assertSyntheticSandboxAccess('Synthetic tracker workspace data');
   const storedState = loadStoredTrackerState(overrides);
   if (storedState) {
     const derived = computeFIFO(storedState.batches, storedState.trades);
