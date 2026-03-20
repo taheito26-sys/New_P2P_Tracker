@@ -88,7 +88,7 @@ const LOCAL_DEV_ORIGINS = new Set([
 ]);
 
 function appEnv(c: Context<{ Bindings: Bindings }>): string {
-  return (c.env.APP_ENV || 'development').trim().toLowerCase();
+  return (c.env.APP_ENV || 'production').trim().toLowerCase();
 }
 
 function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
@@ -100,33 +100,9 @@ function requestOrigin(c: Context<{ Bindings: Bindings }>): string {
   return url.origin;
 }
 
-
-function appEnv(c: Context<{ Bindings: Bindings }>): string {
-  return (c.env.APP_ENV || 'production').trim().toLowerCase();
-}
-
-function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
-  return appEnv(c) === 'production';
-}
-
 function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
   return !isProductionEnv(c);
 }
-
-
-
-function appEnv(c: Context<{ Bindings: Bindings }>): string {
-  return (c.env.APP_ENV || 'production').trim().toLowerCase();
-}
-
-function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
-  return appEnv(c) === 'production';
-}
-
-function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
-  return !isProductionEnv(c);
-}
-
 
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
   const configured = (c.env.ALLOWED_ORIGINS || '')
@@ -1024,6 +1000,44 @@ merchant.patch('/deals/:id', async (c) => {
     .run();
 
   return c.json({ ok: true, deal: await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(c.req.param('id')).first() });
+});
+
+merchant.delete('/deals/:id', async (c) => {
+  const deal = await c.env.DB.prepare('SELECT id, relationship_id FROM merchant_deals WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{ id: string; relationship_id: string }>();
+  if (!deal) return c.json({ error: 'Deal not found' }, 404);
+
+  const access = await relationshipAccess(c, deal.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const [settlement, profit, pendingCloseApproval] = await Promise.all([
+    c.env.DB.prepare('SELECT id FROM merchant_settlements WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
+    c.env.DB.prepare('SELECT id FROM merchant_profit_records WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
+    c.env.DB.prepare('SELECT id FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ? AND status = ? LIMIT 1').bind('deal', deal.id, 'pending').first<{ id: string }>(),
+  ]);
+
+  if (settlement || profit) {
+    return c.json({ error: 'Deal cannot be deleted once settlement or profit records exist' }, 409);
+  }
+
+  if (pendingCloseApproval) {
+    return c.json({ error: 'Deal cannot be deleted while a close approval request is still pending' }, 409);
+  }
+
+  await c.env.DB.prepare('DELETE FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ?').bind('deal', deal.id).run();
+  await c.env.DB.prepare('DELETE FROM merchant_deals WHERE id = ?').bind(deal.id).run();
+
+  await auditLog(c, {
+    relationshipId: deal.relationship_id,
+    actorUserId: c.get('userId'),
+    actorMerchantId: access.myMerchantId,
+    entityType: 'deal',
+    entityId: deal.id,
+    action: 'deleted',
+  });
+
+  return c.json({ ok: true, deleted: deal.id });
 });
 
 merchant.post('/deals/:id/close', async (c) => {

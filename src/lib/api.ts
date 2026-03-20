@@ -179,6 +179,14 @@ export const deals = {
       method: 'PATCH', body: JSON.stringify(data),
     }),
 
+  deletePermanent: (id: string) =>
+    request<{ ok: boolean; deleted: string }>(`/api/merchant/deals/${id}`, {
+      method: 'DELETE',
+    }),
+
+  delete: (id: string) =>
+    deals.deletePermanent(id),
+
   submitSettlement: (dealId: string, data: { amount: number; currency?: string; note?: string }) =>
     request<{ ok: boolean; settlement_id: string; approval_id: string }>(`/api/merchant/deals/${dealId}/submit-settlement`, {
       method: 'POST', body: JSON.stringify(data),
