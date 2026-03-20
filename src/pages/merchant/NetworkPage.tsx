@@ -24,15 +24,13 @@ import type { MerchantSearchResult, MerchantInvite, MerchantRelationship, Mercha
 /* ─── Helpers ─── */
 function dealStatusStyle(status: string) {
   switch (status) {
-    case 'active': return 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30';
-    case 'due': return 'bg-amber-500/10 text-amber-600 border border-amber-500/30';
-    case 'overdue': return 'bg-red-500/10 text-red-500 border border-red-500/30';
-    case 'settled': return 'bg-blue-500/10 text-blue-600 border border-blue-500/30';
+    case 'approved': return 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30';
+    case 'pending': return 'bg-amber-500/10 text-amber-600 border border-amber-500/30';
     default: return 'bg-muted text-muted-foreground border border-border';
   }
 }
 
-type DealFilter = 'all' | 'active' | 'due' | 'overdue' | 'settled';
+type DealFilter = 'all' | 'pending' | 'approved';
 
 /* ═══════════════════════════════════════════════════════════
    NETWORK PAGE — Deals Dashboard (no sidebar)
@@ -137,8 +135,8 @@ export default function NetworkPage() {
   const pendingApprovals = aprInbox.filter(a => a.status === 'pending');
   const totalAlerts = pendingInvites.length + pendingApprovals.length;
   const totalUnread = Object.values(unreadMap).reduce((s, n) => s + n, 0);
-  const overdueDeals = allDeals.filter(d => d.status === 'overdue');
-  const activeDeals = allDeals.filter(d => ['active', 'due', 'overdue'].includes(d.status));
+  const pendingDeals = allDeals.filter(d => d.status === 'pending');
+  const activeDeals = allDeals.filter(d => d.status === 'approved');
 
   const filteredDeals = useMemo(() => {
     if (dealFilter === 'all') return allDeals;
@@ -150,8 +148,8 @@ export default function NetworkPage() {
     const pnl = allDeals.reduce((s, d) => s + (d.realized_pnl ?? 0), 0);
     const incoming = allDeals.filter(d => d.created_by !== userId).length;
     const outcome = allDeals.filter(d => d.created_by === userId).length;
-    return { vol, pnl, active: activeDeals.length, overdue: overdueDeals.length, incoming, outcome };
-  }, [allDeals, activeDeals, overdueDeals, userId]);
+    return { vol, pnl, active: activeDeals.length, pending: pendingDeals.length, incoming, outcome };
+  }, [allDeals, activeDeals, pendingDeals, userId]);
 
   // Lookup: deal → relationship → counterparty name
   const relMap = useMemo(() => {
@@ -374,17 +372,10 @@ export default function NetworkPage() {
           <p className="text-[11px] text-muted-foreground">{t('activeDeals')}</p>
           <p className="text-xl font-medium leading-tight mt-0.5">{summary.active}</p>
         </div>
-        {summary.overdue > 0 ? (
-          <div className="px-3 py-2 rounded-lg bg-red-500/10 cursor-pointer hover:bg-red-500/15 transition-colors" onClick={() => setDealFilter('overdue')}>
-            <p className="text-[11px] text-red-500">{t('overdue')}</p>
-            <p className="text-xl font-medium leading-tight mt-0.5 text-red-500">{summary.overdue}</p>
-          </div>
-        ) : (
-          <div className="px-3 py-2 rounded-lg bg-secondary">
-            <p className="text-[11px] text-muted-foreground">{t('overdue')}</p>
-            <p className="text-xl font-medium leading-tight mt-0.5">0</p>
-          </div>
-        )}
+        <div className="px-3 py-2 rounded-lg bg-secondary">
+          <p className="text-[11px] text-muted-foreground">Pending deals</p>
+          <p className="text-xl font-medium leading-tight mt-0.5">{summary.pending}</p>
+        </div>
         <div className="px-3 py-2 rounded-lg bg-secondary">
           <p className="text-[11px] text-muted-foreground">Volume</p>
           <p className="text-xl font-medium leading-tight mt-0.5 font-mono">${summary.vol.toLocaleString()}</p>
@@ -400,7 +391,7 @@ export default function NetworkPage() {
       {/* ─── FILTER BAR ─── */}
       <div className="shrink-0 flex items-center gap-1.5 px-4 py-2 border-b border-border">
         <Filter className="w-[13px] h-[13px] text-muted-foreground shrink-0" />
-        {(['all', 'active', 'due', 'overdue', 'settled'] as DealFilter[]).map(f => (
+        {(['all', 'pending', 'approved'] as DealFilter[]).map(f => (
           <button
             key={f}
             onClick={() => setDealFilter(f)}
@@ -448,15 +439,10 @@ export default function NetworkPage() {
                     className="border-b border-border/50 hover:bg-secondary/50 transition-colors cursor-pointer relative group"
                     onClick={() => rel && navigate(`/network/relationships/${rel.id}`)}
                   >
-                    {/* Accent bar */}
-                    {deal.status === 'overdue' && <td className="absolute left-0 top-0 bottom-0 w-[3px] bg-red-500 rounded-r-sm p-0" />}
-                    {deal.status === 'due' && <td className="absolute left-0 top-0 bottom-0 w-[3px] bg-amber-500 rounded-r-sm p-0" />}
-
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-7 h-7 rounded-md flex items-center justify-center text-sm shrink-0 ${
-                          deal.status === 'overdue' ? 'bg-red-500/10' :
-                          ['active', 'due'].includes(deal.status) ? 'bg-emerald-500/10' : 'bg-secondary'
+                          deal.status === 'approved' ? 'bg-emerald-500/10' : 'bg-secondary'
                         }`}>
                           {cfg?.icon || '📋'}
                         </div>

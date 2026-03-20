@@ -58,11 +58,10 @@ function DashboardPageSandbox() {
     api.approvals.inbox().then(r => setPendingApprovals(r.approvals.filter(a => a.status === 'pending'))).catch(() => {});
   }, []);
 
-  const activeDeals = merchantDeals.filter(d => ['active', 'due', 'overdue'].includes(d.status));
+  const activeDeals = merchantDeals.filter(d => d.status === 'approved');
   const merchantExposure = activeDeals.reduce((s, d) => s + d.amount, 0);
   const merchantPnL = merchantDeals.reduce((s, d) => s + (d.realized_pnl || 0), 0);
-  const overdueDeals = merchantDeals.filter(d => d.status === 'overdue');
-  const settlementsDue = merchantDeals.filter(d => d.status === 'due');
+  const pendingDeals = merchantDeals.filter(d => d.status === 'pending');
 
   // ── P2P Averages from real trade data ──
   const p2pAvgs = useMemo(() => {
@@ -234,9 +233,8 @@ function DashboardPageSandbox() {
           <div className="kpi-lbl">{t('merchantRealizedPnl')}</div>
           <div className={`kpi-val ${merchantPnL >= 0 ? 'good' : 'bad'}`}>${merchantPnL.toLocaleString()}</div>
           <div className="kpi-sub">
-            {overdueDeals.length > 0 && <span style={{ color: 'var(--bad)', fontWeight: 700 }}>{overdueDeals.length} {t('overdue')}</span>}
-            {settlementsDue.length > 0 && <span style={{ color: 'var(--warn)', fontWeight: 700, marginLeft: 6 }}>{settlementsDue.length} {t('due')}</span>}
-            {overdueDeals.length === 0 && settlementsDue.length === 0 && <span>{t('allClear')}</span>}
+            {pendingDeals.length > 0 && <span style={{ color: 'var(--warn)', fontWeight: 700 }}>{pendingDeals.length} pending</span>}
+            {pendingDeals.length === 0 && <span>{t('allClear')}</span>}
           </div>
         </div>
       </div>
