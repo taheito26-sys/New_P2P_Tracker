@@ -41,11 +41,14 @@ Worker API runs via Wrangler and is proxied through Vite at `/api`.
 
 ## Demo mode
 
-Demo mode is disabled by default. To enable local demo fallback, set:
+Demo and synthetic sandbox data are disabled by default in production builds. For explicit local development-only sandbox behavior, set:
 
 ```sh
 VITE_ENABLE_DEMO_MODE=true
+VITE_ENABLE_SANDBOX_DATA=true
 ```
+
+Also set `vars.APP_ENV` to `development` locally and `production` in deployed environments so synthetic worker-side P2P data is disabled outside sandbox use.
 
 ## Validation
 

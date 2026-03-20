@@ -24,6 +24,7 @@
                          }
                      ],
     "vars":  {
+                 "APP_ENV":  "development",
                  "ALLOWED_ORIGINS":  "*",
                  "AUTH_SOURCE":  "cloudflare-access"
              },

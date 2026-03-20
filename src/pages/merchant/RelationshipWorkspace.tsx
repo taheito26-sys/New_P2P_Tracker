@@ -22,6 +22,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MerchantRelationship, MerchantMessage, MerchantDeal, MerchantApproval } from '@/types/domain';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
+
+export default function RelationshipWorkspace() {
+  return <RelationshipWorkspaceCore />;
+}
 
 /* ─── Helpers ─── */
 function dealStatusStyle(status: string) {
@@ -41,18 +46,33 @@ function dealStatusStyle(status: string) {
    No tabs. Deals table = main content. Approvals = alert bars.
    Chat = collapsible bottom drawer (rare usage).
    ═══════════════════════════════════════════════════════════ */
-export default function RelationshipWorkspace() {
+function RelationshipWorkspaceCore() {
   const { id } = useParams<{ id: string }>();
   const { userId } = useAuth();
   const { settings } = useTheme();
   const navigate = useNavigate();
   const t = useT();
 
-  const sharedData = useMemo(() => createDemoState({
-    lowStockThreshold: settings.lowStockThreshold,
-    priceAlertThreshold: settings.priceAlertThreshold,
-  }), [settings.lowStockThreshold, settings.priceAlertThreshold]);
-  const [trackerState, setTrackerState] = useState(sharedData.state);
+  const sharedData = useMemo(() => isSandboxDataEnabled()
+    ? createDemoState({
+      lowStockThreshold: settings.lowStockThreshold,
+      priceAlertThreshold: settings.priceAlertThreshold,
+    }).state
+    : {
+      currency: 'QAR' as const,
+      range: settings.range,
+      batches: [],
+      trades: [],
+      customers: [],
+      cashQAR: 0,
+      cashOwner: '',
+      settings: {
+        lowStockThreshold: settings.lowStockThreshold,
+        priceAlertThreshold: settings.priceAlertThreshold,
+      },
+      cal: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDay: null },
+    }, [settings.lowStockThreshold, settings.priceAlertThreshold, settings.range]);
+  const [trackerState, setTrackerState] = useState(sharedData);
   const sharedCustomers = trackerState.customers;
   const sharedSuppliers = useMemo(() => {
     const names = trackerState.batches.map(b => b.source.trim()).filter(Boolean);
@@ -83,10 +103,15 @@ export default function RelationshipWorkspace() {
     if (!id) return;
     try {
       const [
-        { relationship }, { messages }, { deals: relDealsData }, { approvals: inbox }, { approvals: sent }
+        { relationship }, messagesResult, { deals: relDealsData }, { approvals: inbox }, { approvals: sent }
       ] = await Promise.all([
         api.relationships.get(id), api.messages.list(id), api.deals.list(id), api.approvals.inbox(), api.approvals.sent()
       ]);
+      const unreadIncoming = messagesResult.messages.filter(m => !m.is_read && m.sender_user_id !== userId);
+      if (unreadIncoming.length > 0) {
+        await Promise.all(unreadIncoming.map((message) => api.messages.markRead(message.id)));
+      }
+      const { messages } = unreadIncoming.length > 0 ? await api.messages.list(id) : messagesResult;
       setRel(relationship);
       setMsgs(messages);
       setRelDeals(relDealsData);
@@ -96,7 +121,7 @@ export default function RelationshipWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, userId]);
 
   useEffect(() => { reload(); }, [reload]);
   useRealtimeRefresh(reload, ['new_message', 'approval_update', 'deal_update']);

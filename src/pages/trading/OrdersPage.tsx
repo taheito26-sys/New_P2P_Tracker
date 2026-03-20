@@ -16,12 +16,22 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { toast } from 'sonner';
 import type { MerchantRelationship, MerchantDeal } from '@/types/domain';
 import '@/styles/tracker.css';
+import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
+import { isSandboxDataEnabled } from '@/lib/runtime-mode';
+
+export default function OrdersPage() {
+  if (!isSandboxDataEnabled()) {
+    return <SandboxOnlyNotice title="Orders sandbox data is disabled" description="Synthetic orders/trades data is available only in local development sandbox mode." />;
+  }
+
+  return <OrdersPageSandbox />;
+}
 
 const nowInput = () => new Date().toISOString().slice(0, 16);
 const normalizeName = (v: string) => v.trim().toLowerCase();
 function toInputFromTs(ts: number) { return new Date(ts).toISOString().slice(0, 16); }
 
-export default function OrdersPage() {
+function OrdersPageSandbox() {
   const { settings } = useTheme();
   const { userId } = useAuth();
   const t = useT();
