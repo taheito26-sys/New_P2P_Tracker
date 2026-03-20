@@ -133,12 +133,18 @@ export interface Trade {
   usesStock: boolean;
   revisions: any[];
   customerId: string;
-  /** Linked merchant deal ID (if this is a merchant order — legacy, kept for old data) */
+  /** Linked merchant deal ID (legacy only; new workflow does not create deals) */
   linkedDealId?: string;
-  /** Linked relationship ID (if this is a merchant order) */
+  /** Linked relationship ID for partner-linked trades */
   linkedRelId?: string;
-  /** Linked merchant user/profile ID (counterparty) */
+  /** Counterparty merchant/profile identifier */
   linkedMerchantId?: string;
+  /** Whether this trade was submitted through the merchant-linked flow */
+  isPartnerLinked?: boolean;
+  /** Creator user id for shared trade ownership */
+  createdByUserId?: string;
+  /** Counterparty merchant id for display / matching */
+  counterpartyMerchantId?: string;
   // ── Trade-centric agreement fields ──
   /** Agreement family: profit_share or sales_deal */
   agreementFamily?: 'profit_share' | 'sales_deal';
@@ -152,6 +158,12 @@ export interface Trade {
   approvalStatus?: LinkedTradeStatus;
   /** Who requested cancellation (user_id), if cancellation_pending */
   cancellationRequestedBy?: string;
+  /** Why cancellation was requested */
+  cancellationReason?: string;
+  /** When cancellation was requested */
+  cancellationRequestedAt?: number;
+  /** Approval decisions for cancellation keyed by user id */
+  cancellationDecisions?: Record<string, 'approved' | 'rejected'>;
 }
 
 export interface Customer {
