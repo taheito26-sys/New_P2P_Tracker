@@ -28,6 +28,19 @@ function getDeleteLockReason(deal: MerchantDeal): string {
   return 'Locked';
 }
 
+function getDeleteLockExplanation(deal: MerchantDeal): string {
+  if (deal.realized_pnl != null) {
+    return 'This deal already has recorded profit/loss history, so it must stay in the ledger.';
+  }
+  if (deal.close_date) {
+    return 'This deal is already closed, so deletion is disabled.';
+  }
+  if (normalizeDealStatus(deal.status) === 'approved') {
+    return 'This deal is already approved. Approved deals are treated as shared business records and cannot be deleted.';
+  }
+  return 'Deletion is available only while the deal is still pending and has no recorded history.';
+}
+
 export default function DealsPage() {
   const { userId } = useAuth();
   const t = useT();
@@ -309,7 +322,7 @@ export default function DealsPage() {
                 {t('delete')}
               </button>
             ) : (
-              <span className="text-xs text-muted-foreground">Deletion is available only while the deal is still pending and has no recorded history.</span>
+              <span className="text-xs text-muted-foreground">{editingDeal ? getDeleteLockExplanation(editingDeal) : 'Deletion is unavailable for this deal.'}</span>
             )}
             <div className="flex gap-2 ml-auto">
               <button
