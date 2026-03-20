@@ -91,17 +91,17 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
           </div>
         </div>
 
-        <label className="tracker-search tracker-search--mobile-inline" aria-label={t('search')}>
-          <Search className="tracker-search-icon" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('search')}
-          />
-        </label>
-
         {mobileControlsOpen && (
           <div className="tracker-topbar-mobile-panel">
+            <label className="tracker-search tracker-search--mobile-inline" aria-label={t('search')}>
+              <Search className="tracker-search-icon" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('search')}
+              />
+            </label>
+
             <div className="tracker-seg tracker-seg--mobile" role="group" aria-label={t('dateRange')}>
               {RANGE_OPTIONS.map((opt) => (
                 <button

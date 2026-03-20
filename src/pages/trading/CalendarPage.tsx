@@ -125,7 +125,7 @@ function CalendarPageSandbox() {
       <div className="panel">
         <div className="panel-head">
           <h2>{mn[month]} {year}</h2>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button className="btn secondary" onClick={prevMonth}>{t('prev')}</button>
             <button className="btn secondary" onClick={goToday}>{t('today')}</button>
             <button className="btn secondary" onClick={nextMonth}>{t('next')}</button>
