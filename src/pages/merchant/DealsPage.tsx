@@ -41,6 +41,41 @@ function getDeleteLockExplanation(deal: MerchantDeal): string {
   return 'Deletion is available only while the deal is still pending and has no recorded history.';
 }
 
+type DeleteBlocker = {
+  kind: 'settlement' | 'profit' | string;
+  id: string;
+  reason: 'approved_record' | 'pending_approval' | string;
+};
+
+function formatDeleteBlockers(blockers: DeleteBlocker[]): string {
+  const groups = new Map<string, number>();
+
+  for (const blocker of blockers) {
+    const reasonLabel = blocker.reason === 'pending_approval'
+      ? 'still pending approval'
+      : 'already approved';
+    const kindLabel = blocker.kind === 'profit'
+      ? 'profit record'
+      : blocker.kind === 'settlement'
+        ? 'settlement record'
+        : 'linked record';
+    const label = `${kindLabel} ${reasonLabel}`;
+    groups.set(label, (groups.get(label) || 0) + 1);
+  }
+
+  const summary = Array.from(groups.entries()).map(([label, count]) => (
+    `${count} ${label}${count === 1 ? '' : 's'}`
+  ));
+
+  if (summary.length === 0) {
+    return 'This deal can no longer be deleted because it has linked financial records.';
+  }
+  if (summary.length === 1) {
+    return `Deletion blocked: this deal has ${summary[0]}.`;
+  }
+  return `Deletion blocked: this deal has ${summary.join(' and ')}.`;
+}
+
 export default function DealsPage() {
   const { userId } = useAuth();
   const t = useT();
@@ -111,10 +146,9 @@ export default function DealsPage() {
       toast.success(t('deletedSuccessfully'));
     } catch (err: any) {
       if (err?.status === 409) {
-        const blockers = err?.body?.detail?.blockers as Array<{ kind: string; id: string; reason: string }> | undefined;
+        const blockers = err?.body?.detail?.blockers as DeleteBlocker[] | undefined;
         if (blockers?.length) {
-          const summary = blockers.map((blocker) => `${blocker.kind}:${blocker.id}`).join(', ');
-          toast.error(`Deletion blocked by linked records: ${summary}`);
+          toast.error(formatDeleteBlockers(blockers));
           return;
         }
         toast.error(err?.message || 'This deal can no longer be deleted. Review any linked settlement, profit, or approval records instead.');
