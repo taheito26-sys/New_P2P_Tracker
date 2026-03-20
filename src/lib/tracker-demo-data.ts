@@ -90,8 +90,14 @@ function normalizeTrade(raw: unknown): Trade | null {
     agreementTemplateId: typeof trade.agreementTemplateId === 'string' ? trade.agreementTemplateId : undefined,
     partnerPct: trade.partnerPct == null ? undefined : num(trade.partnerPct, 0),
     merchantPct: trade.merchantPct == null ? undefined : num(trade.merchantPct, 0),
+    isPartnerLinked: Boolean(trade.isPartnerLinked ?? trade.linkedRelId ?? trade.agreementFamily ?? trade.approvalStatus),
+    createdByUserId: typeof trade.createdByUserId === 'string' ? trade.createdByUserId : undefined,
+    counterpartyMerchantId: typeof trade.counterpartyMerchantId === 'string' ? trade.counterpartyMerchantId : undefined,
     approvalStatus: typeof trade.approvalStatus === 'string' ? trade.approvalStatus as Trade['approvalStatus'] : undefined,
     cancellationRequestedBy: typeof trade.cancellationRequestedBy === 'string' ? trade.cancellationRequestedBy : undefined,
+    cancellationReason: typeof trade.cancellationReason === 'string' ? trade.cancellationReason : undefined,
+    cancellationRequestedAt: trade.cancellationRequestedAt == null ? undefined : num(trade.cancellationRequestedAt, Date.now()),
+    cancellationDecisions: trade.cancellationDecisions && typeof trade.cancellationDecisions === 'object' ? trade.cancellationDecisions as Record<string, 'approved' | 'rejected'> : undefined,
   };
 }
 
