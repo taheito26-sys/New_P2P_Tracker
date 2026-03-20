@@ -68,8 +68,51 @@ type RelationshipAccess = {
   counterpartyProfile: MerchantProfile | null;
 };
 
+type SessionRow = {
+  id: string;
+  user_id: string;
+  expires_at: string;
+};
+
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-let inMemoryResetCounter = 0;
+
+const SESSION_COOKIE_NAME = '__Host-session';
+const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const LOCAL_DEV_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://localhost:4173',
+  'http://localhost:5000',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:4173',
+  'http://127.0.0.1:5000',
+]);
+
+function appEnv(c: Context<{ Bindings: Bindings }>): string {
+  return (c.env.APP_ENV || 'development').trim().toLowerCase();
+}
+
+function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
+  return appEnv(c) === 'production';
+}
+
+function requestOrigin(c: Context<{ Bindings: Bindings }>): string {
+  const url = new URL(c.req.url);
+  return url.origin;
+}
+
+
+function appEnv(c: Context<{ Bindings: Bindings }>): string {
+  return (c.env.APP_ENV || 'production').trim().toLowerCase();
+}
+
+function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
+  return appEnv(c) === 'production';
+}
+
+function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
+  return !isProductionEnv(c);
+}
+
 
 
 function appEnv(c: Context<{ Bindings: Bindings }>): string {
@@ -86,38 +129,59 @@ function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
 
 
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
-  return (c.env.ALLOWED_ORIGINS || '')
+  const configured = (c.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+
+  const sanitized = configured.filter((origin) => origin !== '*');
+  const sameOrigin = requestOrigin(c);
+
+  if (sanitized.length > 0) {
+    return Array.from(new Set([...sanitized, sameOrigin]));
+  }
+
+  if (isProductionEnv(c)) {
+    return [sameOrigin];
+  }
+
+  return Array.from(new Set([...LOCAL_DEV_ORIGINS, sameOrigin]));
 }
 
 function originAllowed(origins: string[], origin: string | undefined): boolean {
-  if (!origin) return false;
-  if (origins.length === 0) return true;
-  if (origins.includes('*')) return true;
+  if (!origin) return true;
+  if (origins.length === 0) return false;
   return origins.includes(origin);
 }
 
 function parseCookie(cookieHeader: string | undefined, name: string): string | null {
   if (!cookieHeader) return null;
-  const match = cookieHeader.match(new RegExp(`${name}=([^;]+)`));
-  return match ? match[1] : null;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
-function secureCookie(c: Context<{ Bindings: Bindings }>): boolean {
-  return Boolean(c.req.header('Origin')?.startsWith('https://'));
+function requestIsSecure(c: Context<{ Bindings: Bindings }>): boolean {
+  const forwardedProto = c.req.header('X-Forwarded-Proto') || c.req.header('x-forwarded-proto');
+  if (forwardedProto) return forwardedProto.toLowerCase() === 'https';
+  const url = new URL(c.req.url);
+  return url.protocol === 'https:';
 }
 
 function sessionCookie(value: string, secure: boolean, maxAge: number): string {
-  return [
-    `session=${value}`,
+  const parts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(value)}`,
     'HttpOnly',
     'Path=/',
     `Max-Age=${maxAge}`,
-    'SameSite=Lax',
-    secure ? 'Secure' : '',
-  ].filter(Boolean).join('; ');
+    'SameSite=Strict',
+  ];
+
+  if (secure) {
+    parts.push('Secure');
+  }
+
+  return parts.join('; ');
 }
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -198,6 +262,55 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
   return actualHash === expectedHash;
 }
 
+function isMissingRateLimitTableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('no such table: auth_rate_limits');
+}
+
+async function applyRateLimit(
+  c: Context<{ Bindings: Bindings }>,
+  action: 'login' | 'signup' | 'reset-password',
+  identifier: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<Response | null> {
+  const ip = c.req.header('CF-Connecting-IP') || 'unknown';
+  const normalizedIdentifier = identifier.trim().toLowerCase() || 'anonymous';
+  const scope = `${action}:${ip}:${normalizedIdentifier}`;
+  const now = Date.now();
+  const windowStartedAt = new Date(Math.floor(now / (windowSeconds * 1000)) * windowSeconds * 1000).toISOString();
+
+  try {
+    await c.env.DB.prepare('DELETE FROM auth_rate_limits WHERE window_started_at < datetime("now", "-2 hours")').run();
+
+    const existing = await c.env.DB.prepare(
+      'SELECT id, attempts FROM auth_rate_limits WHERE action = ? AND scope = ? AND window_started_at = ?',
+    ).bind(action, scope, windowStartedAt).first<{ id: string; attempts: number }>();
+
+    if (!existing) {
+      await c.env.DB.prepare(
+        'INSERT INTO auth_rate_limits (id, action, scope, attempts, window_started_at) VALUES (?, ?, ?, ?, ?)',
+      ).bind(`arl_${crypto.randomUUID()}`, action, scope, 1, windowStartedAt).run();
+      return null;
+    }
+
+    if (existing.attempts >= limit) {
+      return c.json({ error: 'Too many requests. Please try again later.' }, 429);
+    }
+
+    await c.env.DB.prepare('UPDATE auth_rate_limits SET attempts = attempts + 1 WHERE id = ?')
+      .bind(existing.id)
+      .run();
+    return null;
+  } catch (error) {
+    if (isMissingRateLimitTableError(error)) {
+      console.warn('auth_rate_limits table is missing; skipping rate limiting until migration 003 is applied');
+      return null;
+    }
+    throw error;
+  }
+}
+
 app.use('*', async (c, next) => {
   const origins = allowedOrigins(c);
   return cors({
@@ -207,7 +320,7 @@ app.use('*', async (c, next) => {
       return '';
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type'],
     credentials: true,
   })(c, next);
 });
@@ -215,6 +328,9 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const origin = c.req.header('Origin');
   const origins = allowedOrigins(c);
+  if (isProductionEnv(c) && origins.length === 0) {
+    return c.json({ error: 'Server misconfigured: ALLOWED_ORIGINS must be set in production' }, 500);
+  }
   if (origin && !originAllowed(origins, origin)) {
     return c.json({ error: 'Origin not allowed' }, 403);
   }
@@ -222,14 +338,29 @@ app.use('*', async (c, next) => {
 });
 
 async function sessionForRequest(c: Context<{ Bindings: Bindings }>) {
-  const authHeader = c.req.header('Authorization');
-  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  const cookie = parseCookie(c.req.header('Cookie'), 'session');
-  const token = bearer || cookie;
-  if (!token) return null;
-  return await c.env.DB.prepare(
+  const cookieToken = parseCookie(c.req.header('Cookie'), SESSION_COOKIE_NAME);
+  if (!cookieToken) return null;
+
+  const tokenHash = await sha256Hex(cookieToken);
+  const session = await c.env.DB.prepare(
     'SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > datetime("now")',
-  ).bind(token).first<{ id: string; user_id: string; expires_at: string }>();
+  ).bind(tokenHash).first<SessionRow>();
+
+  if (session) {
+    return session;
+  }
+
+  const legacySession = await c.env.DB.prepare(
+    'SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > datetime("now")',
+  ).bind(cookieToken).first<SessionRow>();
+
+  if (!legacySession) return null;
+
+  await c.env.DB.prepare('UPDATE sessions SET id = ? WHERE id = ?')
+    .bind(tokenHash, cookieToken)
+    .run();
+
+  return { ...legacySession, id: tokenHash };
 }
 
 const requireAuth: MiddlewareHandler<{ Bindings: Bindings; Variables: Variables }> = async (c, next) => {
@@ -482,14 +613,19 @@ app.get('/api/status', (c) => c.json({ ok: true, lastUpdate: new Date().toISOStr
 const auth = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 auth.post('/signup', async (c) => {
-  const { email, password } = await c.req.json<{ email?: string; password?: string }>();
+  const body = await c.req.json<{ email?: string; password?: string }>().catch(() => ({}));
+  const email = body.email?.trim().toLowerCase() || '';
+  const password = body.password || '';
+  const limited = await applyRateLimit(c, 'signup', email, 5, 15 * 60);
+  if (limited) return limited;
+
   if (!email || !password || password.length < 8) {
     return c.json({ error: 'Email and password (min 8 chars) are required' }, 400);
   }
 
   try {
     await c.env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)')
-      .bind(crypto.randomUUID(), email.trim().toLowerCase(), await hashPassword(password))
+      .bind(crypto.randomUUID(), email, await hashPassword(password))
       .run();
     return c.json({ ok: true });
   } catch (error) {
@@ -501,24 +637,30 @@ auth.post('/signup', async (c) => {
 
 auth.post('/login', async (c) => {
   await cleanupSessions(c);
-  const { email, password } = await c.req.json<{ email?: string; password?: string }>();
+  const body = await c.req.json<{ email?: string; password?: string }>().catch(() => ({}));
+  const email = body.email?.trim().toLowerCase() || '';
+  const password = body.password || '';
+  const limited = await applyRateLimit(c, 'login', email, 10, 15 * 60);
+  if (limited) return limited;
+
   if (!email || !password) return c.json({ error: 'Email and password are required' }, 400);
 
   const user = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?')
-    .bind(email.trim().toLowerCase())
+    .bind(email)
     .first<{ id: string; password_hash: string }>();
   if (!user || !(await verifyPassword(password, user.password_hash))) {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
   const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const tokenHash = await sha256Hex(token);
+  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString();
   await c.env.DB.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)')
-    .bind(token, user.id, expiresAt)
+    .bind(tokenHash, user.id, expiresAt)
     .run();
 
-  c.header('Set-Cookie', sessionCookie(token, secureCookie(c), 30 * 24 * 60 * 60));
-  return c.json({ ok: true, user_id: user.id, token });
+  c.header('Set-Cookie', sessionCookie(token, requestIsSecure(c), SESSION_MAX_AGE_SECONDS));
+  return c.json({ ok: true, user_id: user.id });
 });
 
 auth.post('/logout', requireAuth, async (c) => {
@@ -526,7 +668,7 @@ auth.post('/logout', requireAuth, async (c) => {
   if (session) {
     await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(session.id).run();
   }
-  c.header('Set-Cookie', sessionCookie('', secureCookie(c), 0));
+  c.header('Set-Cookie', sessionCookie('', requestIsSecure(c), 0));
   return c.json({ ok: true });
 });
 
@@ -539,16 +681,15 @@ auth.get('/session', requireAuth, async (c) => {
 });
 
 auth.post('/verify-email', async (c) => {
-  const { token } = await c.req.json<{ token?: string }>().catch(() => ({ token: undefined }));
-  if (!token) return c.json({ error: 'Verification token is required' }, 400);
-  return c.json({ ok: true });
+  return c.json({ error: 'Email verification is not configured for this deployment' }, 501);
 });
 
 auth.post('/reset-password', async (c) => {
-  const { email } = await c.req.json<{ email?: string }>().catch(() => ({ email: undefined }));
-  if (!email) return c.json({ error: 'Email is required' }, 400);
-  inMemoryResetCounter += 1;
-  return c.json({ ok: true, request_id: `reset_${inMemoryResetCounter}` });
+  const body = await c.req.json<{ email?: string }>().catch(() => ({}));
+  const email = body.email?.trim().toLowerCase() || 'anonymous';
+  const limited = await applyRateLimit(c, 'reset-password', email, 5, 15 * 60);
+  if (limited) return limited;
+  return c.json({ error: 'Password reset is not configured for this deployment' }, 501);
 });
 
 app.route('/api/auth', auth);

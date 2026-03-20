@@ -32,12 +32,15 @@ export interface PortfolioAnalytics {
 }
 
 // ─── Configuration ──────────────────────────────────────────────────
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://tracker-platform.taheito26.workers.dev';
-let authToken: string | null = null;
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+  return '';
 }
+
+const API_BASE = resolveApiBase();
 
 // ─── HTTP Transport ─────────────────────────────────────────────────
 async function request<T>(
@@ -49,10 +52,6 @@ async function request<T>(
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   };
-
-  if (authToken) {
-    headers.Authorization = `Bearer ${authToken}`;
-  }
 
   const res = await fetch(url, { ...options, headers, credentials: 'include' });
 
@@ -82,7 +81,7 @@ export const auth = {
       method: 'POST', body: JSON.stringify({ email, password }),
     }),
   login: (email: string, password: string) =>
-    request<{ ok: boolean; user_id: string; token: string }>('/api/auth/login', {
+    request<{ ok: boolean; user_id: string }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
     }),
   logout: () =>

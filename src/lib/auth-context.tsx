@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { auth as authApi, merchant, setAuthToken } from '@/lib/api';
+import { auth as authApi, merchant } from '@/lib/api';
 import { isDemoMode, getDemoMode, DEMO_USER, DEMO_PROFILE } from '@/lib/demo-mode';
 import type { MerchantProfile } from '@/types/domain';
 
@@ -74,9 +74,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     const result = await authApi.login(email, password);
-    setAuthToken(result.token);
     setUserId(result.user_id);
-    setEmail(email);
+    setEmail(email.trim().toLowerCase());
     await refreshProfile();
   }, [refreshProfile]);
 
@@ -86,9 +85,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await authApi.signup(email, password);
     const result = await authApi.login(email, password);
-    setAuthToken(result.token);
     setUserId(result.user_id);
-    setEmail(email);
+    setEmail(email.trim().toLowerCase());
     await refreshProfile();
   }, [refreshProfile]);
 
@@ -98,7 +96,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Ignore logout transport failures while clearing local state.
       }
     }
-    setAuthToken(null);
     setUserId(null);
     setEmail(null);
     setProfile(null);
