@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { CreateDealDialog } from '@/components/deals/CreateDealDialog';
 import { DEAL_TYPE_CONFIGS, calculateOutstanding } from '@/lib/deal-engine';
 import { useRealtimeRefresh } from '@/hooks/use-realtime';
@@ -432,7 +432,9 @@ function RelationshipWorkspaceCore() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Settle & Close Deal</DialogTitle>
-            <p className="text-sm text-muted-foreground mt-1">Submit the capital return and profit. Once the counterparty approves, the deal closes automatically.</p>
+            <DialogDescription>
+              Submit the capital return and profit. Once the counterparty approves, the deal closes automatically.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {isPartnershipSettle ? (
@@ -469,7 +471,9 @@ function RelationshipWorkspaceCore() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><X className="w-4 h-4 text-red-500" /> Reject Deal</DialogTitle>
-            <p className="text-sm text-muted-foreground mt-1">Reject and suggest changes.</p>
+            <DialogDescription>
+              Send feedback and propose revised terms without forcing the deal into a hidden legacy status.
+            </DialogDescription>
           </DialogHeader>
           {rejectDealData && (
             <div className="space-y-4 py-2">

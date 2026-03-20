@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -505,6 +505,9 @@ export default function NetworkPage() {
               <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center"><UserPlus className="w-4 h-4 text-blue-600" /></div>
               {t('sendInviteTo')} {inviteTarget?.display_name}
             </DialogTitle>
+            <DialogDescription>
+              Send a collaboration invitation with a role and optional note for the selected merchant.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
