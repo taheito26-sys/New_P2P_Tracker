@@ -259,6 +259,7 @@
   padding: 10px 12px;
   backdrop-filter: blur(8px);
 }
+.tracker-topbar--mobile { padding: 10px; }
 .tracker-topbar-title-wrap { min-width: 180px; display: flex; align-items: center; gap: 10px; }
 .tracker-topbar-heading { min-width: 0; }
 .tracker-menu-btn {
@@ -298,6 +299,7 @@
   min-width: 80px;
 }
 .tracker-search--mobile { order: 1; flex: 1 1 100%; }
+.tracker-search--mobile-inline { width: 100%; min-width: 0; flex: 1 1 auto; }
 .tracker-search-icon { width: 14px; height: 14px; color: var(--tracker-muted); }
 .tracker-seg {
   display: inline-flex;
@@ -360,6 +362,12 @@
   cursor: pointer;
 }
 .tracker-icon-btn--compact { order: 2; }
+.tracker-icon-btn--mobile-toggle.active {
+  border-color: color-mix(in srgb, var(--tracker-brand) 35%, transparent);
+  background: var(--tracker-brand3);
+  color: var(--tracker-brand);
+}
+.tracker-icon-btn--mobile-panel { min-width: 40px; min-height: 40px; }
 .tracker-sync { color: var(--tracker-good); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .tracker-user { display: inline-flex; align-items: center; gap: 6px; }
 .tracker-user-avatar {
@@ -380,6 +388,31 @@
 .tracker-signout { font-size: 11px; font-weight: 700; }
 .tracker-plus { background: var(--tracker-brand); border-color: var(--tracker-brand); color: #fff; }
 .tracker-plus--mobile { order: 2; min-width: 38px; }
+.tracker-topbar-mobile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.tracker-topbar-mobile-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.tracker-topbar-mobile-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  padding-top: 4px;
+}
+.tracker-alert-box--mobile-panel {
+  flex: 1 1 calc(100% - 48px);
+  min-height: 40px;
+  justify-content: center;
+}
 
 /* ── BLINK ── */
 @keyframes tracker-blink { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -416,6 +449,9 @@
   .tracker-root .panel-body { padding-left: 10px; padding-right: 10px; }
   .tracker-topbar-title { font-size: 12px; }
   .tracker-topbar-sub { font-size: 9px; }
+  .tracker-topbar-title-wrap { min-width: 0; }
+  .tracker-topbar-mobile-actions { gap: 6px; }
   .tracker-seg--mobile { flex: 1 1 100%; }
   .tracker-alert-box--compact { flex: 1 1 calc(50% - 4px); }
+  .tracker-alert-box--mobile-panel { flex-basis: calc(100% - 46px); }
 }
