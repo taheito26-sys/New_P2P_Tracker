@@ -300,6 +300,9 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const origin = c.req.header('Origin');
   const origins = allowedOrigins(c);
+  if (isProductionEnv(c) && origins.length === 0) {
+    return c.json({ error: 'Server misconfigured: ALLOWED_ORIGINS must be set in production' }, 500);
+  }
   if (origin && !originAllowed(origins, origin)) {
     return c.json({ error: 'Origin not allowed' }, 403);
   }
