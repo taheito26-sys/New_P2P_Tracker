@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { assertDealStatusTransition } from '../src/lib/merchant-deal-status';
+import { assertDealStatusTransition, normalizeDealStatus } from '../src/lib/merchant-deal-status';
 import { analyzeDealDeleteDiagnostics, type LinkedFinancialRecord } from '../src/lib/merchant-deal-delete';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
@@ -398,7 +398,7 @@ async function summaryForRelationship(c: Context<{ Bindings: Bindings; Variables
   let activeExposure = 0;
   let realizedProfit = 0;
   for (const deal of deals.results) {
-    if (deal.status === 'approved') activeExposure += deal.amount || 0;
+    if (normalizeDealStatus(deal.status) === 'approved') activeExposure += deal.amount || 0;
     realizedProfit += deal.realized_pnl || 0;
   }
 
@@ -1608,7 +1608,7 @@ app.get('/api/analytics', requireAuth, async (c) => {
 
   const today = new Date().toISOString().split('T')[0];
   deals.results.forEach((deal) => {
-    const isApproved = deal.status === 'approved';
+    const isApproved = normalizeDealStatus(deal.status) === 'approved';
 
     totalDeployed += deal.amount || 0;
     if (isApproved) {

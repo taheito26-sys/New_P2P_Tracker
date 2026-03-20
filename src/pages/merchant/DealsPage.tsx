@@ -9,7 +9,7 @@ import { Briefcase } from 'lucide-react';
 import { getAgreementFamilyLabel, getDealShares } from '@/lib/deal-templates';
 import { isSupportedDealType } from '@/types/domain';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getAllowedDealStatusTransitions } from '@/lib/merchant-deal-status';
+import { getAllowedDealStatusTransitions, normalizeDealStatus } from '@/lib/merchant-deal-status';
 import type { MerchantDeal, MerchantRelationship } from '@/types/domain';
 
 const statusColors: Record<string, string> = {
@@ -18,13 +18,13 @@ const statusColors: Record<string, string> = {
 };
 
 function canDeleteDeal(deal: MerchantDeal): boolean {
-  return deal.status === 'pending' && deal.realized_pnl == null && !deal.close_date;
+  return normalizeDealStatus(deal.status) === 'pending' && deal.realized_pnl == null && !deal.close_date;
 }
 
 function getDeleteLockReason(deal: MerchantDeal): string {
   if (deal.realized_pnl != null) return 'History recorded';
   if (deal.close_date) return 'Already closed';
-  if (deal.status === 'approved') return 'Approved deal';
+  if (normalizeDealStatus(deal.status) === 'approved') return 'Approved deal';
   return 'Locked';
 }
 
@@ -66,7 +66,7 @@ export default function DealsPage() {
     setEditingDeal(deal);
     setEditTitle(deal.title || '');
     setEditAmount(String(deal.amount || 0));
-    setEditStatus(deal.status || 'pending');
+    setEditStatus(normalizeDealStatus(deal.status));
     setEditNote(String((deal.metadata as any)?.note || ''));
   };
 
@@ -148,6 +148,7 @@ export default function DealsPage() {
                   const merchantName = relationship?.counterparty?.display_name || '—';
                   const customerName = String((deal.metadata as any)?.customer_name || '');
                   const deletable = canDeleteDeal(deal);
+                  const normalizedStatus = normalizeDealStatus(deal.status);
 
                   return (
                     <tr key={deal.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
@@ -164,7 +165,7 @@ export default function DealsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`text-xs ${statusColors[deal.status] || statusColors.pending}`}>{deal.status}</Badge>
+                        <Badge className={`text-xs ${statusColors[normalizedStatus] || statusColors.pending}`}>{normalizedStatus}</Badge>
                         {isLegacy && <Badge variant="secondary" className="text-xs ml-1">{t('legacyAgreement')}</Badge>}
                       </td>
                       <td className="px-4 py-3">
@@ -279,7 +280,7 @@ export default function DealsPage() {
                   onChange={e => setEditStatus(e.target.value)}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 >
-                  {[editingDeal?.status, ...getAllowedDealStatusTransitions((editingDeal?.status || 'pending') as any)]
+                  {[normalizeDealStatus(editingDeal?.status), ...getAllowedDealStatusTransitions(editingDeal?.status)]
                     .filter((status, index, arr): status is string => Boolean(status) && arr.indexOf(status) === index)
                     .map(status => (
                       <option key={status} value={status}>{status}</option>

@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useRealtimeRefresh } from '@/hooks/use-realtime';
 import { DEAL_TYPE_CONFIGS } from '@/lib/deal-engine';
+import { normalizeDealStatus } from '@/lib/merchant-deal-status';
 import {
   Loader2, Search, UserPlus, Check, X, RotateCcw, Mail, Users,
   CheckSquare, MessageCircle, AlertCircle, Briefcase,
@@ -135,12 +136,12 @@ export default function NetworkPage() {
   const pendingApprovals = aprInbox.filter(a => a.status === 'pending');
   const totalAlerts = pendingInvites.length + pendingApprovals.length;
   const totalUnread = Object.values(unreadMap).reduce((s, n) => s + n, 0);
-  const pendingDeals = allDeals.filter(d => d.status === 'pending');
-  const activeDeals = allDeals.filter(d => d.status === 'approved');
+  const pendingDeals = allDeals.filter(d => normalizeDealStatus(d.status) === 'pending');
+  const activeDeals = allDeals.filter(d => normalizeDealStatus(d.status) === 'approved');
 
   const filteredDeals = useMemo(() => {
     if (dealFilter === 'all') return allDeals;
-    return allDeals.filter(d => d.status === dealFilter);
+    return allDeals.filter(d => normalizeDealStatus(d.status) === dealFilter);
   }, [allDeals, dealFilter]);
 
   const summary = useMemo(() => {
@@ -399,7 +400,7 @@ export default function NetworkPage() {
               dealFilter === f ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            {f === 'all' ? `All (${allDeals.length})` : `${f} (${allDeals.filter(d => d.status === f).length})`}
+            {f === 'all' ? `All (${allDeals.length})` : `${f} (${allDeals.filter(d => normalizeDealStatus(d.status) === f).length})`}
           </button>
         ))}
       </div>
@@ -443,7 +444,7 @@ export default function NetworkPage() {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-7 h-7 rounded-md flex items-center justify-center text-sm shrink-0 ${
-                          deal.status === 'approved' ? 'bg-emerald-500/10' : 'bg-secondary'
+                          normalizeDealStatus(deal.status) === 'approved' ? 'bg-emerald-500/10' : 'bg-secondary'
                         }`}>
                           {cfg?.icon || '📋'}
                         </div>
@@ -473,7 +474,7 @@ export default function NetworkPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${dealStatusStyle(deal.status)}`}>{deal.status}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${dealStatusStyle(normalizeDealStatus(deal.status))}`}>{normalizeDealStatus(deal.status)}</span>
                     </td>
                     <td className="px-4 py-2.5 text-[12px] text-muted-foreground whitespace-nowrap">
                       {deal.issue_date}{deal.due_date ? ` → ${deal.due_date}` : ''}
