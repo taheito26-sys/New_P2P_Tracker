@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { assertDealStatusTransition } from '../src/lib/merchant-deal-status';
+import { analyzeDealDeleteDiagnostics, type LinkedFinancialRecord } from '../src/lib/merchant-deal-delete';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 
@@ -1019,14 +1020,52 @@ merchant.delete('/deals/:id', async (c) => {
   const access = await relationshipAccess(c, deal.relationship_id);
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
 
-  const [settlement, profit, pendingCloseApproval] = await Promise.all([
-    c.env.DB.prepare('SELECT id FROM merchant_settlements WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
-    c.env.DB.prepare('SELECT id FROM merchant_profit_records WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
+  const [settlements, profits, pendingCloseApproval] = await Promise.all([
+    c.env.DB.prepare(`
+      SELECT s.id, s.deal_id, s.status, a.status AS approval_status, a.id AS approval_id
+      FROM merchant_settlements s
+      LEFT JOIN merchant_approvals a
+        ON a.target_entity_type = 'settlement'
+       AND a.target_entity_id = s.id
+      WHERE s.deal_id = ?
+      ORDER BY s.created_at DESC
+    `).bind(deal.id).all<LinkedFinancialRecord>(),
+    c.env.DB.prepare(`
+      SELECT p.id, p.deal_id, p.status, a.status AS approval_status, a.id AS approval_id
+      FROM merchant_profit_records p
+      LEFT JOIN merchant_approvals a
+        ON a.target_entity_type = 'profit'
+       AND a.target_entity_id = p.id
+      WHERE p.deal_id = ?
+      ORDER BY p.created_at DESC
+    `).bind(deal.id).all<LinkedFinancialRecord>(),
     c.env.DB.prepare('SELECT id FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ? AND status = ? LIMIT 1').bind('deal', deal.id, 'pending').first<{ id: string }>(),
   ]);
 
-  if (settlement || profit) {
-    return c.json({ error: 'Deal cannot be deleted because settlement or profit records already exist. Keep the deal for history and review those records instead.' }, 409);
+  const deleteDiagnostics = analyzeDealDeleteDiagnostics({
+    dealId: deal.id,
+    settlements: settlements.results,
+    profits: profits.results,
+  });
+
+  console.info('[merchant-deals] delete attempt diagnostics', {
+    dealId: deal.id,
+    relationshipId: deal.relationship_id,
+    settlementIds: settlements.results.map((row) => row.id),
+    profitIds: profits.results.map((row) => row.id),
+    blockers: deleteDiagnostics.blockers,
+    ignored: deleteDiagnostics.ignored,
+    pendingCloseApprovalId: pendingCloseApproval?.id || null,
+  });
+
+  if (deleteDiagnostics.blockers.length > 0) {
+    return c.json({
+      error: 'Deal deletion blocked by linked financial records',
+      detail: {
+        blockers: deleteDiagnostics.blockers,
+        ignored: deleteDiagnostics.ignored,
+      },
+    }, 409);
   }
 
   if (pendingCloseApproval) {
@@ -1262,6 +1301,17 @@ merchant.post('/approvals/:id/reject', async (c) => {
     SET status = ?, resolution_note = ?, resolved_at = datetime("now"), updated_at = datetime("now")
     WHERE id = ?
   `).bind('rejected', body.note || null, approval.id).run();
+
+  if (approval.target_entity_type === 'settlement') {
+    await c.env.DB.prepare('UPDATE merchant_settlements SET status = ?, updated_at = datetime("now") WHERE id = ?')
+      .bind('rejected', approval.target_entity_id)
+      .run();
+  } else if (approval.target_entity_type === 'profit') {
+    await c.env.DB.prepare('UPDATE merchant_profit_records SET status = ?, updated_at = datetime("now") WHERE id = ?')
+      .bind('rejected', approval.target_entity_id)
+      .run();
+  }
+
   return c.json({ ok: true });
 });
 

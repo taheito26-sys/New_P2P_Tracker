@@ -98,6 +98,12 @@ export default function DealsPage() {
       toast.success(t('deletedSuccessfully'));
     } catch (err: any) {
       if (err?.status === 409) {
+        const blockers = err?.body?.detail?.blockers as Array<{ kind: string; id: string; reason: string }> | undefined;
+        if (blockers?.length) {
+          const summary = blockers.map((blocker) => `${blocker.kind}:${blocker.id}`).join(', ');
+          toast.error(`Deletion blocked by linked records: ${summary}`);
+          return;
+        }
         toast.error(err?.message || 'This deal can no longer be deleted. Review any linked settlement, profit, or approval records instead.');
         return;
       }
