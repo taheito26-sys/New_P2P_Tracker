@@ -162,7 +162,7 @@ export default function P2PTrackerPage() {
 
   if (loading && !snapshot && !error) {
     return (
-      <div className="tracker-root" style={{ padding: 10 }}>
+      <div className="tracker-root app-page-shell">
         <div className="empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <div className="empty-t">{t.lang === 'ar' ? 'جاري تحميل بيانات P2P…' : 'Loading P2P data…'}</div>
@@ -173,7 +173,7 @@ export default function P2PTrackerPage() {
 
   if (error && !snapshot) {
     return (
-      <div className="tracker-root" style={{ padding: 10 }}>
+      <div className="tracker-root app-page-shell">
         <div className="empty">
           <div className="empty-t">{error}</div>
           <div className="muted" style={{ fontSize: 12 }}>
@@ -189,7 +189,7 @@ export default function P2PTrackerPage() {
   const ccy = currentMarket.currency;
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 10 }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
       {/* ── Status Bar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         {/* Market selector */}
@@ -231,7 +231,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── 6 KPI Cards ── */}
-      <div className="kpis" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', marginBottom: 10 }}>
+      <div className="kpis kpis-6" style={{ marginBottom: 10 }}>
         <div className="kpi-card">
           <div className="kpi-lbl">{t.lang === 'ar' ? 'أفضل بيع' : 'BEST SELL'}</div>
           <div className="kpi-val" style={{ color: 'var(--bad)' }}>{snapshot.bestSell?.toFixed(2) || '—'}</div>
@@ -273,7 +273,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── Price History + Position Advisor (2 col) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="splitGrid2" style={{ marginBottom: 10 }}>
         {/* Price History — 24h only */}
         <div className="panel">
           <div className="panel-head">
@@ -368,7 +368,7 @@ export default function P2PTrackerPage() {
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+            <div className="splitGrid2" style={{ gap: 8, marginTop: 4 }}>
               <button className="btn" style={{ justifyContent: 'center' }} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); }}>
                 {t.lang === 'ar' ? 'تطبيق سعر البيع' : 'Apply Sell Rate'}
               </button>
@@ -381,7 +381,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── Sell Offers + Restock Offers (2 col) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="splitGrid2" style={{ marginBottom: 10 }}>
         {/* Sell Offers — RED color theme */}
         <div className="panel">
           <div className="panel-head">
