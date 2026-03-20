@@ -50,17 +50,18 @@ export default function SettingsPage() {
   const curThemeEntries = Object.entries(curLayoutDef.themes) as [string, ThemeDef][];
 
   return (
-    <div className="tracker-page" dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('settings')} description={t('layoutThemesData')}>
-        {dirty && (
-          <div className="flex items-center gap-2">
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('settings')} description={t('layoutThemesData')}>
+          {dirty && (
+            <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={discardSettings}><RotateCcw className="w-3 h-3 mr-1" /> {t('discardBtn')}</Button>
             <Button size="sm" onClick={commitSettings}><Save className="w-3 h-3 mr-1" /> {t('saveSettings')}</Button>
-          </div>
-        )}
-      </PageHeader>
+            </div>
+          )}
+        </PageHeader>
 
-      <div className="p-6 space-y-4">
+        <div className="space-y-4">
         {/* ── Layout Templates ── */}
         <Card className="glass">
           <CardHeader className="pb-2">
@@ -297,6 +298,7 @@ export default function SettingsPage() {
               </p>
             </CardContent>
           </Card>
+        </div>
         </div>
       </div>
     </div>

@@ -1,24 +1,18 @@
 import { useMemo, useState } from 'react';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import { fmtU, fmtDate } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CRMPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is available only in local development sandbox mode." />;
-  }
-
-  return <CRMPageSandbox />;
+  return <CRMPageWorkspace />;
 }
 
-function CRMPageSandbox() {
+function CRMPageWorkspace() {
   const { settings } = useTheme();
   const t = useT();
-  const { state } = useMemo(() => createDemoState({
+  const { state } = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
   }), [settings.lowStockThreshold, settings.priceAlertThreshold]);
@@ -56,7 +50,7 @@ function CRMPageSandbox() {
   };
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       {/* Tab toggle */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 4 }}>
