@@ -27,9 +27,10 @@ export default function AuditPage() {
   }, []);
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('auditTrail')} description={t('completeHistory')} />
-      <div className="p-6 space-y-2">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('auditTrail')} description={t('completeHistory')} />
+        <div className="space-y-2">
         {loading && <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
         {!loading && logs.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
@@ -39,7 +40,7 @@ export default function AuditPage() {
         )}
         {logs.map(log => (
           <Card key={log.id} className="glass">
-            <CardContent className="flex items-center justify-between p-3">
+            <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-primary" />
                 <div>
@@ -53,6 +54,7 @@ export default function AuditPage() {
             </CardContent>
           </Card>
         ))}
+        </div>
       </div>
     </div>
   );
