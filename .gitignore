@@ -11,9 +11,23 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.secrets
 infra/.wrangler
+.wrangler/
+infra/backups/
 *.patch
 lint_output.txt
+playwright-report/
+test-results/
 
 # Editor directories and files
 .vscode/*
