@@ -9,7 +9,7 @@ import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CRMPage() {
   if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is available only in local development sandbox mode." />;
+    return <SandboxOnlyNotice title="CRM sandbox data is disabled" description="Customer/supplier demo data is permanently disabled in this application." />;
   }
 
   return <CRMPageSandbox />;
@@ -56,7 +56,7 @@ function CRMPageSandbox() {
   };
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       {/* Tab toggle */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 4 }}>
