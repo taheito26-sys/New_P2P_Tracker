@@ -263,7 +263,7 @@ function DashboardPageSandbox() {
       </div>
 
       {/* Chart panels */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div className="splitGrid2" style={{ gap: 8 }}>
         <div className="panel">
           <div className="panel-head"><h2>{t('netProfitPerTrade')}</h2><span className="pill muted">{t('allTime')}</span></div>
           <div className="panel-body" style={{ height: 170, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

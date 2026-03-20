@@ -27,7 +27,7 @@ export function AppLayout() {
           isMobile={isMobile}
           onMenuClick={isMobile ? () => setMobileSidebarOpen(true) : undefined}
         />
-        <div className="app-content-scroll flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="app-content-scroll flex-1 overflow-x-auto overflow-y-auto">
           <Outlet />
         </div>
         {isMobile && <MobileBottomNav onMoreClick={() => setMobileSidebarOpen(true)} />}

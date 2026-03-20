@@ -138,28 +138,39 @@
 .app-shell {
   width: 100%;
   max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .main-shell {
   width: 100%;
   min-width: 0;
   max-width: none;
+  box-sizing: border-box;
 }
 
 .app-content-scroll {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .app-page-shell {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 12px;
 }
 
 .app-page-content {
   width: 100%;
   max-width: 1280px;
+  min-width: 0;
+  box-sizing: border-box;
   margin: 0 auto;
 }
 

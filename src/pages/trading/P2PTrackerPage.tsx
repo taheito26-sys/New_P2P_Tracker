@@ -231,7 +231,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── 6 KPI Cards ── */}
-      <div className="kpis" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', marginBottom: 10 }}>
+      <div className="kpis kpis-6" style={{ marginBottom: 10 }}>
         <div className="kpi-card">
           <div className="kpi-lbl">{t.lang === 'ar' ? 'أفضل بيع' : 'BEST SELL'}</div>
           <div className="kpi-val" style={{ color: 'var(--bad)' }}>{snapshot.bestSell?.toFixed(2) || '—'}</div>
@@ -273,7 +273,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── Price History + Position Advisor (2 col) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="splitGrid2" style={{ marginBottom: 10 }}>
         {/* Price History — 24h only */}
         <div className="panel">
           <div className="panel-head">
@@ -368,7 +368,7 @@ export default function P2PTrackerPage() {
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+            <div className="splitGrid2" style={{ gap: 8, marginTop: 4 }}>
               <button className="btn" style={{ justifyContent: 'center' }} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); }}>
                 {t.lang === 'ar' ? 'تطبيق سعر البيع' : 'Apply Sell Rate'}
               </button>
@@ -381,7 +381,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── Sell Offers + Restock Offers (2 col) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="splitGrid2" style={{ marginBottom: 10 }}>
         {/* Sell Offers — RED color theme */}
         <div className="panel">
           <div className="panel-head">

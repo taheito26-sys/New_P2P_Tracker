@@ -50,7 +50,9 @@
   background: var(--bg);
   width: 100%;
   min-width: 0;
-  overflow-x: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: visible;
 }
 
 /* ── KPI BANDS ── */
@@ -105,8 +107,8 @@
 .tracker-root .pill.warn { color: var(--warn); border-color: color-mix(in srgb,var(--warn) 35%,transparent); background: color-mix(in srgb,var(--warn) 10%,transparent); }
 
 /* ── TABLES ── */
-.tracker-root .tableWrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--lt-radius); border: 1px solid var(--line); }
-.tracker-root table { width: 100%; border-collapse: separate; border-spacing: 0; background: rgba(0,0,0,.03); font-family: var(--lt-font); font-size: 11px; }
+.tracker-root .tableWrap { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; border-radius: var(--lt-radius); border: 1px solid var(--line); }
+.tracker-root table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; background: rgba(0,0,0,.03); font-family: var(--lt-font); font-size: 11px; }
 .tracker-root thead th { position: sticky; top: 0; background: var(--panel2); border-bottom: 1px solid var(--line); text-align: left; padding: 8px 10px; font-size: 9px; font-weight: 700; color: var(--muted); white-space: nowrap; letter-spacing: .4px; text-transform: uppercase; }
 .tracker-root tbody td { border-bottom: 1px solid var(--line); padding: 8px 10px; font-size: 11px; vertical-align: middle; }
 .tracker-root tbody tr:last-child td { border-bottom: none; }
@@ -149,7 +151,9 @@
 .tracker-root .modeToggle { display: flex; gap: 2px; padding: 3px; border-radius: var(--lt-radius-sm); border: 1px solid var(--line); background: rgba(255,255,255,.02); }
 .tracker-root .modeToggle button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); border-radius: calc(var(--lt-radius-sm) - 2px); padding: 7px; font-weight: 900; font-size: calc(10px * var(--ui-scale,1)); cursor: pointer; transition: all var(--lt-tr); }
 .tracker-root .modeToggle button.active { background: var(--brand3); color: var(--brand); border-color: color-mix(in srgb,var(--brand) 30%,transparent); }
-.tracker-root .g2tight { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tracker-root .g2tight { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tracker-root .splitGrid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tracker-root .kpis.kpis-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .tracker-root .formActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .tracker-root .msg { font-size: calc(11px * var(--ui-scale,1)); margin-top: 5px; color: var(--muted); }
 .tracker-root .prev-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 3px 0; font-size: calc(12px * var(--ui-scale,1)); }
@@ -426,9 +430,12 @@
 
 @media (max-width: 768px) {
   .tracker-root .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-root .kpis.kpis-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tracker-root .kpi-band-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tracker-root .twoColPage { grid-template-columns: 1fr; }
   .tracker-root .dash-bottom { grid-template-columns: 1fr; }
+  .tracker-root .g2tight { grid-template-columns: 1fr; }
+  .tracker-root .splitGrid2 { grid-template-columns: 1fr; }
   .tracker-root .cal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tracker-root .cal-grid { gap: 2px; }
   .tracker-root .cal-day { min-height: 52px; }
