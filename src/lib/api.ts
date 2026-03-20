@@ -14,9 +14,7 @@ import type {
   Batch,
   Trade,
   P2PSnapshot,
-  P2PHistoryPoint,
-  FinancialDeal,
-  UserPreferences,
+  P2PHistoryPoint
 } from '@/types/domain';
 
 export interface PortfolioAnalytics {
@@ -117,15 +115,6 @@ export const merchant = {
     request<{ profile: MerchantProfile }>('/api/merchant/profile/ensure', {
       method: 'POST', body: JSON.stringify(data),
     }),
-
-  updateProfile: (data: Partial<MerchantProfile>) =>
-    request<{ profile: MerchantProfile }>('/api/merchant/profile/me', {
-      method: 'PATCH', body: JSON.stringify(data),
-    }),
-
-  getProfile: (merchantId: string) =>
-    request<{ profile: MerchantProfile }>(`/api/merchant/profile/${encodeURIComponent(merchantId)}`),
-
   search: (q: string) =>
     request<{ results: MerchantSearchResult[] }>(`/api/merchant/search?q=${encodeURIComponent(q)}`),
 
@@ -169,17 +158,6 @@ export const relationships = {
 
   get: (id: string) =>
     request<{ relationship: MerchantRelationship }>(`/api/merchant/relationships/${id}`),
-
-  updateSettings: (id: string, data: Partial<MerchantRelationship>) =>
-    request<{ ok: boolean; relationship: MerchantRelationship }>(`/api/merchant/relationships/${id}/settings`, {
-      method: 'PATCH', body: JSON.stringify(data),
-    }),
-
-  suspend: (id: string) =>
-    request<{ ok: boolean; approval_id: string }>(`/api/merchant/relationships/${id}/suspend`, { method: 'POST' }),
-
-  terminate: (id: string) =>
-    request<{ ok: boolean; approval_id: string }>(`/api/merchant/relationships/${id}/terminate`, { method: 'POST' }),
 };
 
 // ─── Deals API ──────────────────────────────────────────────────────
@@ -328,58 +306,10 @@ export const p2p = {
     request<P2PHistoryPoint[]>(market && market !== 'qatar' ? `/api/history?market=${market}` : '/api/history'),
 };
 
-// ─── Financials API ─────────────────────────────────────────────────
-export const financials = {
-  listDeals: (params?: { status?: string; deal_type?: string }) => {
-    const search = new URLSearchParams();
-    if (params?.status) search.set('status', params.status);
-    if (params?.deal_type) search.set('deal_type', params.deal_type);
-    const qs = search.toString();
-    return request<{ deals: FinancialDeal[] }>(`/api/deals${qs ? `?${qs}` : ''}`);
-  },
-
-  createDeal: (data: Partial<FinancialDeal>) =>
-    request<{ ok: boolean; deal: FinancialDeal }>('/api/deals', {
-      method: 'POST', body: JSON.stringify(data),
-    }),
-
-  getDeal: (id: string) =>
-    request<{ deal: FinancialDeal }>(`/api/deals/${id}`),
-
-  updateDeal: (id: string, data: Partial<FinancialDeal>) =>
-    request<{ ok: boolean; deal: FinancialDeal }>(`/api/deals/${id}`, {
-      method: 'PATCH', body: JSON.stringify(data),
-    }),
-
-  settleDeal: (id: string, data?: { amount?: number; currency?: string; settled_at?: string }) =>
-    request<{ ok: boolean }>(`/api/deals/${id}/settle`, {
-      method: 'PATCH', body: JSON.stringify(data || {}),
-    }),
-};
-
-// ─── Preferences API ───────────────────────────────────────────────
-export const preferences = {
-  get: () =>
-    request<{ preferences: UserPreferences }>('/api/preferences'),
-
-  update: (data: Partial<UserPreferences>) =>
-    request<{ ok: boolean; preferences: UserPreferences }>('/api/preferences', {
-      method: 'PATCH', body: JSON.stringify(data),
-    }),
-};
-
 // ─── Analytics API ──────────────────────────────────────────────────
 export const analytics = {
   get: () =>
     request<PortfolioAnalytics>('/api/analytics'),
-};
-
-// ─── Import API ─────────────────────────────────────────────────────
-export const importApi = {
-  json: (data: { idempotency_key: string; batches?: unknown[]; trades?: unknown[] }) =>
-    request<{ ok: boolean; reused: boolean; import_job: unknown }>('/api/import/json', {
-      method: 'POST', body: JSON.stringify(data),
-    }),
 };
 
 // ─── Polling fallback for real-time ─────────────────────────────────

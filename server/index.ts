@@ -114,6 +114,20 @@ function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
 }
 
 
+
+function appEnv(c: Context<{ Bindings: Bindings }>): string {
+  return (c.env.APP_ENV || 'production').trim().toLowerCase();
+}
+
+function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
+  return appEnv(c) === 'production';
+}
+
+function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
+  return !isProductionEnv(c);
+}
+
+
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
   const configured = (c.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -725,7 +739,17 @@ merchant.post('/profile/ensure', async (c) => {
   return c.json({ profile: await requireProfile(c) });
 });
 
-// remaining routes unchanged
+merchant.get('/check-nickname', async (c) => {
+  const nickname = c.req.query('nickname')?.trim().toLowerCase() || '';
+  if (nickname.length < 3) return c.json({ nickname, available: false }, 400);
+
+  const existing = await c.env.DB.prepare('SELECT id FROM merchant_profiles WHERE lower(nickname) = ? LIMIT 1')
+    .bind(nickname)
+    .first<{ id: string }>();
+
+  return c.json({ nickname, available: !existing });
+});
+
 merchant.get('/search', async (c) => {
   const q = c.req.query('q')?.trim();
   if (!q) return c.json({ results: [] });
@@ -1087,20 +1111,38 @@ merchant.get('/messages/:id/messages', async (c) => {
   const access = await relationshipAccess(c, c.req.param('id'));
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
   const messages = await c.env.DB.prepare(`
-    SELECT m.*, p.display_name as sender_name
+    SELECT m.*, p.display_name as sender_name,
+           CASE WHEN mmr.id IS NULL THEN 0 ELSE 1 END as is_read
     FROM merchant_messages m
     LEFT JOIN merchant_profiles p ON m.sender_user_id = p.user_id
+    LEFT JOIN merchant_message_reads mmr ON mmr.message_id = m.id AND mmr.user_id = ?
     WHERE m.relationship_id = ?
     ORDER BY m.created_at ASC
-  `).bind(c.req.param('id')).all();
+  `).bind(c.get('userId'), c.req.param('id')).all();
 
   return c.json({
     messages: messages.results.map((message) => ({
       ...message,
       metadata: parseJson<Record<string, unknown>>((message as { metadata?: string }).metadata, {}),
-      is_read: true,
+      is_read: Boolean((message as { is_read?: number }).is_read),
     })),
   });
+});
+
+merchant.post('/messages/mark-read/:messageId', async (c) => {
+  const message = await c.env.DB.prepare('SELECT id, relationship_id FROM merchant_messages WHERE id = ?')
+    .bind(c.req.param('messageId'))
+    .first<{ id: string; relationship_id: string }>();
+  if (!message) return c.json({ error: 'Message not found' }, 404);
+
+  const access = await relationshipAccess(c, message.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  await c.env.DB.prepare(
+    'INSERT OR IGNORE INTO merchant_message_reads (id, message_id, user_id) VALUES (?, ?, ?)',
+  ).bind(`read_${crypto.randomUUID()}`, message.id, c.get('userId')).run();
+
+  return c.json({ ok: true });
 });
 
 merchant.post('/messages/:id/messages', async (c) => {
@@ -1261,8 +1303,183 @@ app.post('/api/merchant/notifications/read-all', requireAuth, async (c) => {
   `).bind(c.get('userId')).run();
   return c.json({ ok: true });
 });
-app.get('/api/batches', requireAuth, (c) => c.json({ batches: [] }));
-app.get('/api/trades', requireAuth, (c) => c.json({ trades: [] }));
+app.get('/api/merchant/poll', requireAuth, async (c) => {
+  const since = c.req.query('since') || new Date(Date.now() - 60_000).toISOString();
+  const invites = await c.env.DB.prepare(`
+    SELECT i.*
+    FROM merchant_invites i
+    JOIN merchant_profiles p ON p.merchant_id = i.to_merchant_id
+    WHERE p.user_id = ? AND datetime(i.updated_at) >= datetime(?)
+    ORDER BY i.updated_at ASC
+  `).bind(c.get('userId'), since).all();
+
+  const messages = await c.env.DB.prepare(`
+    SELECT m.*, p.display_name as sender_name,
+           CASE WHEN mmr.id IS NULL THEN 0 ELSE 1 END as is_read
+    FROM merchant_messages m
+    JOIN merchant_relationships r ON r.id = m.relationship_id
+    LEFT JOIN merchant_profiles p ON p.user_id = m.sender_user_id
+    LEFT JOIN merchant_message_reads mmr ON mmr.message_id = m.id AND mmr.user_id = ?
+    WHERE (r.merchant_a_id IN (SELECT merchant_id FROM merchant_profiles WHERE user_id = ?)
+       OR r.merchant_b_id IN (SELECT merchant_id FROM merchant_profiles WHERE user_id = ?))
+      AND datetime(m.created_at) >= datetime(?)
+      AND m.sender_user_id != ?
+    ORDER BY m.created_at ASC
+  `).bind(c.get('userId'), c.get('userId'), c.get('userId'), since, c.get('userId')).all();
+
+  return c.json({
+    invites: invites.results,
+    messages: messages.results.map((message) => ({
+      ...message,
+      metadata: parseJson<Record<string, unknown>>((message as { metadata?: string }).metadata, {}),
+      is_read: Boolean((message as { is_read?: number }).is_read),
+    })),
+  });
+});
+
+app.get('/api/batches', requireAuth, async (c) => {
+  const assetSymbol = c.req.query('asset_symbol');
+  const batches = await c.env.DB.prepare(`
+    SELECT b.*, COALESCE(SUM(CASE WHEN t.status = 'active' AND t.side = 'sell' THEN t.quantity ELSE 0 END), 0) as allocated_qty
+    FROM batches b
+    LEFT JOIN trades t ON t.source_batch_id = b.id AND t.user_id = b.user_id
+    WHERE b.user_id = ? AND (? IS NULL OR b.asset_symbol = ?)
+    GROUP BY b.id
+    ORDER BY b.acquired_at DESC, b.created_at DESC
+  `).bind(c.get('userId'), assetSymbol || null, assetSymbol || null).all();
+
+  return c.json({
+    batches: batches.results.map((batch) => ({
+      ...batch,
+      allocated_qty: Number((batch as { allocated_qty?: number }).allocated_qty || 0),
+      remaining_qty: Math.max(0, Number((batch as { quantity: number }).quantity) - Number((batch as { allocated_qty?: number }).allocated_qty || 0)),
+    })),
+  });
+});
+
+app.post('/api/batches', requireAuth, async (c) => {
+  const body = await c.req.json<{ asset_symbol?: string; acquired_at?: string; quantity?: number; unit_cost?: number; notes?: string }>();
+  if (!body.asset_symbol || !body.acquired_at || !body.quantity || body.quantity <= 0 || body.unit_cost == null || body.unit_cost < 0) {
+    return c.json({ error: 'asset_symbol, acquired_at, quantity, and unit_cost are required' }, 400);
+  }
+  const id = `bat_${crypto.randomUUID()}`;
+  await c.env.DB.prepare(`
+    INSERT INTO batches (id, user_id, asset_symbol, acquired_at, quantity, unit_cost, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(id, c.get('userId'), body.asset_symbol.trim().toUpperCase(), body.acquired_at, body.quantity, body.unit_cost, body.notes || '').run();
+  const batch = await c.env.DB.prepare('SELECT * FROM batches WHERE id = ? AND user_id = ?').bind(id, c.get('userId')).first();
+  return c.json({ ok: true, batch });
+});
+
+app.patch('/api/batches/:id', requireAuth, async (c) => {
+  const existing = await c.env.DB.prepare('SELECT * FROM batches WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), c.get('userId'))
+    .first();
+  if (!existing) return c.json({ error: 'Batch not found' }, 404);
+  const body = await c.req.json<Partial<{ asset_symbol: string; acquired_at: string; quantity: number; unit_cost: number; notes: string }>>();
+  await c.env.DB.prepare(`
+    UPDATE batches
+    SET asset_symbol = ?, acquired_at = ?, quantity = ?, unit_cost = ?, notes = ?, updated_at = datetime('now')
+    WHERE id = ? AND user_id = ?
+  `).bind(
+    body.asset_symbol?.trim().toUpperCase() || (existing as any).asset_symbol,
+    body.acquired_at || (existing as any).acquired_at,
+    body.quantity ?? (existing as any).quantity,
+    body.unit_cost ?? (existing as any).unit_cost,
+    body.notes ?? (existing as any).notes,
+    c.req.param('id'),
+    c.get('userId'),
+  ).run();
+  const batch = await c.env.DB.prepare('SELECT * FROM batches WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).first();
+  return c.json({ ok: true, batch });
+});
+
+app.delete('/api/batches/:id', requireAuth, async (c) => {
+  const linkedTrade = await c.env.DB.prepare('SELECT id FROM trades WHERE source_batch_id = ? AND user_id = ? LIMIT 1')
+    .bind(c.req.param('id'), c.get('userId'))
+    .first<{ id: string }>();
+  if (linkedTrade) return c.json({ error: 'Batch cannot be deleted while trades reference it' }, 409);
+  const result = await c.env.DB.prepare('DELETE FROM batches WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).run();
+  if ((result.meta.changes || 0) === 0) return c.json({ error: 'Batch not found' }, 404);
+  return c.json({ ok: true, deleted: c.req.param('id') });
+});
+
+app.get('/api/trades', requireAuth, async (c) => {
+  const trades = await c.env.DB.prepare(`
+    SELECT t.*, COALESCE(CASE WHEN t.side = 'sell' AND t.source_batch_id IS NOT NULL THEN t.quantity * b.unit_cost ELSE 0 END, 0) as allocated_cost,
+           COALESCE(CASE WHEN t.side = 'sell' THEN t.quantity ELSE 0 END, 0) as allocated_qty
+    FROM trades t
+    LEFT JOIN batches b ON b.id = t.source_batch_id AND b.user_id = t.user_id
+    WHERE t.user_id = ?
+    ORDER BY t.traded_at DESC, t.created_at DESC
+  `).bind(c.get('userId')).all();
+  return c.json({ trades: trades.results });
+});
+
+app.post('/api/trades', requireAuth, async (c) => {
+  const body = await c.req.json<{ asset_symbol?: string; side?: 'buy' | 'sell'; traded_at?: string; quantity?: number; unit_price?: number; fee?: number; source_batch_id?: string | null; notes?: string }>();
+  if (!body.asset_symbol || !body.side || !body.traded_at || !body.quantity || body.quantity <= 0 || body.unit_price == null || body.unit_price < 0) {
+    return c.json({ error: 'asset_symbol, side, traded_at, quantity, and unit_price are required' }, 400);
+  }
+  if (body.source_batch_id) {
+    const batch = await c.env.DB.prepare('SELECT id FROM batches WHERE id = ? AND user_id = ?').bind(body.source_batch_id, c.get('userId')).first();
+    if (!batch) return c.json({ error: 'Source batch not found' }, 404);
+  }
+  const id = `trd_${crypto.randomUUID()}`;
+  await c.env.DB.prepare(`
+    INSERT INTO trades (id, user_id, asset_symbol, side, traded_at, quantity, unit_price, fee, source_batch_id, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(id, c.get('userId'), body.asset_symbol.trim().toUpperCase(), body.side, body.traded_at, body.quantity, body.unit_price, body.fee || 0, body.source_batch_id || null, body.notes || '').run();
+  const trade = await c.env.DB.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?').bind(id, c.get('userId')).first();
+  return c.json({ ok: true, trade });
+});
+
+app.patch('/api/trades/:id', requireAuth, async (c) => {
+  const existing = await c.env.DB.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), c.get('userId'))
+    .first();
+  if (!existing) return c.json({ error: 'Trade not found' }, 404);
+  const body = await c.req.json<Partial<{ asset_symbol: string; side: 'buy' | 'sell'; traded_at: string; quantity: number; unit_price: number; fee: number; source_batch_id: string | null; notes: string; status: 'active' | 'void' }>>();
+  if (body.source_batch_id) {
+    const batch = await c.env.DB.prepare('SELECT id FROM batches WHERE id = ? AND user_id = ?').bind(body.source_batch_id, c.get('userId')).first();
+    if (!batch) return c.json({ error: 'Source batch not found' }, 404);
+  }
+  await c.env.DB.prepare(`
+    UPDATE trades
+    SET asset_symbol = ?, side = ?, traded_at = ?, quantity = ?, unit_price = ?, fee = ?, source_batch_id = ?, notes = ?, status = ?, updated_at = datetime('now')
+    WHERE id = ? AND user_id = ?
+  `).bind(
+    body.asset_symbol?.trim().toUpperCase() || (existing as any).asset_symbol,
+    body.side || (existing as any).side,
+    body.traded_at || (existing as any).traded_at,
+    body.quantity ?? (existing as any).quantity,
+    body.unit_price ?? (existing as any).unit_price,
+    body.fee ?? (existing as any).fee,
+    body.source_batch_id !== undefined ? body.source_batch_id : (existing as any).source_batch_id,
+    body.notes ?? (existing as any).notes,
+    body.status || (existing as any).status,
+    c.req.param('id'),
+    c.get('userId'),
+  ).run();
+  const trade = await c.env.DB.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).first();
+  return c.json({ ok: true, trade });
+});
+
+app.patch('/api/trades/:id/void', requireAuth, async (c) => {
+  const result = await c.env.DB.prepare(`
+    UPDATE trades
+    SET status = 'void', updated_at = datetime('now')
+    WHERE id = ? AND user_id = ?
+  `).bind(c.req.param('id'), c.get('userId')).run();
+  if ((result.meta.changes || 0) === 0) return c.json({ error: 'Trade not found' }, 404);
+  return c.json({ ok: true });
+});
+
+app.delete('/api/trades/:id', requireAuth, async (c) => {
+  const result = await c.env.DB.prepare('DELETE FROM trades WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).run();
+  if ((result.meta.changes || 0) === 0) return c.json({ error: 'Trade not found' }, 404);
+  return c.json({ ok: true, deleted: c.req.param('id') });
+});
 app.get('/api/latest', async (c) => {
   if (!p2pSandboxEnabled(c)) {
     return c.json({ error: 'Live P2P market data is not configured for this environment' }, 503);
