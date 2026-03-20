@@ -1,7 +1,7 @@
 import type { MerchantProfile } from '@/types/domain';
 
 let _demoMode: boolean | null = null;
-const DEMO_MODE_ENABLED = import.meta.env.VITE_ENABLE_DEMO_MODE === 'true';
+const DEMO_MODE_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_MODE === 'true';
 
 export async function isDemoMode(): Promise<boolean> {
   if (_demoMode !== null) return _demoMode;
@@ -32,7 +32,6 @@ export function getDemoMode(): boolean {
 export const DEMO_USER = {
   user_id: 'demo-user-001',
   email: 'demo@tracker.local',
-  token: 'demo-token',
 };
 
 export const DEMO_PROFILE: MerchantProfile = {

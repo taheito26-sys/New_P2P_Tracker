@@ -1,27 +1,33 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { auth } from '@/lib/api';
+import { auth, ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { KeyRound, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function ResetPasswordPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       await auth.resetPassword(email);
-      setSent(true);
-      toast.success('Password reset email sent');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to send reset email');
+      toast.success('If recovery is enabled for this deployment, a reset email will be sent.');
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 501) {
+        setUnavailable(true);
+        toast.error('Password reset is not enabled for this deployment.');
+      } else {
+        const message = err instanceof Error ? err.message : 'Failed to process password reset request';
+        toast.error(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -36,26 +42,34 @@ export default function ResetPasswordPage() {
           </div>
           <CardTitle className="font-display text-2xl">Reset Password</CardTitle>
           <CardDescription>
-            {sent ? 'Check your email for a reset link.' : 'Enter your email to receive a password reset link.'}
+            Request password recovery only when this deployment has a configured email reset service.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {!sent ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                Send Reset Link
-              </Button>
-            </form>
-          ) : (
-            <Button asChild className="w-full">
-              <Link to="/auth/login">Return to Sign In</Link>
-            </Button>
+        <CardContent className="space-y-4">
+          {unavailable && (
+            <Alert>
+              <AlertTitle>Password reset unavailable</AlertTitle>
+              <AlertDescription>
+                This deployment does not have a production-ready password reset flow configured.
+                Contact an administrator for account recovery.
+              </AlertDescription>
+            </Alert>
           )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+            </div>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Request Password Reset
+            </Button>
+          </form>
+
+          <Button asChild variant="outline" className="w-full">
+            <Link to="/auth/login">Return to Sign In</Link>
+          </Button>
         </CardContent>
       </Card>
     </div>
