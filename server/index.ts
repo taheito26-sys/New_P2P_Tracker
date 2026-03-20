@@ -88,7 +88,7 @@ const LOCAL_DEV_ORIGINS = new Set([
 ]);
 
 function appEnv(c: Context<{ Bindings: Bindings }>): string {
-  return (c.env.APP_ENV || 'development').trim().toLowerCase();
+  return (c.env.APP_ENV || 'production').trim().toLowerCase();
 }
 
 function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
@@ -100,33 +100,9 @@ function requestOrigin(c: Context<{ Bindings: Bindings }>): string {
   return url.origin;
 }
 
-
-function appEnv(c: Context<{ Bindings: Bindings }>): string {
-  return (c.env.APP_ENV || 'production').trim().toLowerCase();
-}
-
-function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
-  return appEnv(c) === 'production';
-}
-
 function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
   return !isProductionEnv(c);
 }
-
-
-
-function appEnv(c: Context<{ Bindings: Bindings }>): string {
-  return (c.env.APP_ENV || 'production').trim().toLowerCase();
-}
-
-function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
-  return appEnv(c) === 'production';
-}
-
-function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
-  return !isProductionEnv(c);
-}
-
 
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
   const configured = (c.env.ALLOWED_ORIGINS || '')
