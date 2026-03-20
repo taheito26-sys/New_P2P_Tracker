@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, ArrowLeftRight, ArrowDown, ArrowUp } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Trade } from '@/types/domain';
+import { useT } from '@/lib/i18n';
 
 export default function TradesPage() {
+  const t = useT();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -25,9 +27,10 @@ export default function TradesPage() {
   }, []);
 
   return (
-    <div>
-      <PageHeader title="Trades" description="Trade history with FIFO allocation" />
-      <div className="p-6 space-y-2">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title="Trades" description="Trade history with FIFO allocation" />
+        <div className="space-y-2">
         {loading && <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
         {!loading && trades.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
@@ -41,7 +44,7 @@ export default function TradesPage() {
             : null;
           return (
             <Card key={t.id} className="glass">
-              <CardContent className="flex items-center justify-between p-3">
+              <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                     t.side === 'buy' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
@@ -72,6 +75,7 @@ export default function TradesPage() {
             </Card>
           );
         })}
+        </div>
       </div>
     </div>
   );

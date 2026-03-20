@@ -14,17 +14,17 @@ import {
   Calendar,
   UserCircle,
   CloudUpload,
-  MessageCircle,
+  X,
+  MoreHorizontal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { useT, type TranslationKey } from '@/lib/i18n';
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Badge } from '@/components/ui/badge';
+import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
 import { useRealtime } from '@/hooks/use-realtime';
 
-const tradingNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
+export const tradingNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'dashboard', icon: LayoutDashboard, path: '/dashboard' },
   { labelKey: 'orders', icon: ArrowLeftRight, path: '/trading/orders' },
   { labelKey: 'stock', icon: Wallet, path: '/trading/stock' },
@@ -33,7 +33,7 @@ const tradingNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'crm', icon: UserCircle, path: '/crm' },
 ];
 
-const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
+export const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'network', icon: Users, path: '/network' },
   { labelKey: 'deals', icon: Briefcase, path: '/deals' },
   { labelKey: 'analytics', icon: BarChart3, path: '/analytics' },
@@ -41,13 +41,14 @@ const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'settings', icon: Settings, path: '/settings' },
 ];
 
-export function AppSidebar() {
-  const location = useLocation();
-  const { profile, userId, isAuthenticated, logout } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
-  const t = useT();
+type AppSidebarProps = {
+  isMobile?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+};
 
-  // Track unread messages
+function useUnreadMessageCount() {
+  const { profile, userId, isAuthenticated, logout } = useAuth();
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
 
   const fetchUnread = useCallback(async () => {
@@ -72,12 +73,65 @@ export function AppSidebar() {
     }
   });
 
+  return { unreadMsgCount, profile, logout };
+}
+
+export function MobileBottomNav({ onMoreClick }: { onMoreClick: () => void }) {
+  const location = useLocation();
+  const t = useT();
+  const { unreadMsgCount } = useUnreadMessageCount();
+  const primaryNav = [
+    tradingNav[0],
+    tradingNav[1],
+    tradingNav[2],
+    tradingNav[4],
+    networkNav[0],
+    tradingNav[3],
+    networkNav[3],
+  ];
+
   return (
+    <nav className="mobile-bottom-nav md:hidden" dir={t.isRTL ? 'rtl' : 'ltr'} aria-label="Mobile navigation">
+      {primaryNav.map((item) => {
+        const active = location.pathname === item.path || (item.path === '/network' && location.pathname.startsWith('/network'));
+        const showBadge = item.path === '/network' && unreadMsgCount > 0;
+
+        return (
+          <Link key={item.path} to={item.path} className={cn('mobile-bottom-nav__item', active && 'is-active')}>
+            <span className="mobile-bottom-nav__icon-wrap">
+              <item.icon className="mobile-bottom-nav__icon" />
+              {showBadge && <span className="mobile-bottom-nav__badge">{unreadMsgCount > 9 ? '9+' : unreadMsgCount}</span>}
+            </span>
+            <span className="mobile-bottom-nav__label">{t(item.labelKey)}</span>
+          </Link>
+        );
+      })}
+      <button type="button" onClick={onMoreClick} className="mobile-bottom-nav__item">
+        <span className="mobile-bottom-nav__icon-wrap">
+          <MoreHorizontal className="mobile-bottom-nav__icon" />
+        </span>
+        <span className="mobile-bottom-nav__label">More</span>
+      </button>
+    </nav>
+  );
+}
+
+export function AppSidebar({ isMobile = false, mobileOpen = false, onMobileClose }: AppSidebarProps) {
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+  const t = useT();
+  const { unreadMsgCount, profile, logout } = useUnreadMessageCount();
+
+  const sidebarContent = (
     <aside
       dir={t.isRTL ? 'rtl' : 'ltr'}
       className={cn(
-        'h-screen flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-all duration-300',
-        collapsed ? 'w-14' : 'w-52'
+        'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300',
+        isMobile
+          ? 'w-[320px] max-w-[88vw] shadow-2xl'
+          : collapsed
+            ? 'w-14'
+            : 'w-52'
       )}
     >
       {/* Header */}
@@ -90,9 +144,20 @@ export function AppSidebar() {
             <span className="font-display font-bold text-sm tracking-tight">{t('tracker')}</span>
           </div>
         )}
-        <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-md hover:bg-sidebar-accent transition-colors">
-          <ChevronLeft className={cn('w-4 h-4 transition-transform', collapsed && 'rotate-180')} />
-        </button>
+        {isMobile ? (
+          <button
+            onClick={onMobileClose}
+            className="rounded-md p-1.5 transition-colors hover:bg-sidebar-accent"
+            aria-label="Close navigation"
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          <button onClick={() => setCollapsed(!collapsed)} className="rounded-md p-1.5 transition-colors hover:bg-sidebar-accent" type="button">
+            <ChevronLeft className={cn('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
+          </button>
+        )}
       </div>
 
       {/* Profile */}
@@ -113,6 +178,7 @@ export function AppSidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={isMobile ? onMobileClose : undefined}
               className={cn(
                 'flex items-center gap-3 mx-2 px-3 py-2 rounded-md text-sm transition-colors',
                 active
@@ -134,6 +200,7 @@ export function AppSidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={isMobile ? onMobileClose : undefined}
               className={cn(
                 'flex items-center gap-3 mx-2 px-3 py-2 rounded-md text-sm transition-colors relative',
                 active
@@ -160,6 +227,7 @@ export function AppSidebar() {
       <div className="border-t border-sidebar-border p-2 space-y-1">
         <Link
           to="/notifications"
+          onClick={isMobile ? onMobileClose : undefined}
           className="flex items-center gap-3 mx-0 px-3 py-2 rounded-md text-sm hover:bg-sidebar-accent transition-colors"
         >
           <Bell className="w-4 h-4" />
@@ -174,5 +242,30 @@ export function AppSidebar() {
         </button>
       </div>
     </aside>
+  );
+
+  if (!isMobile) {
+    return sidebarContent;
+  }
+
+  return (
+    <>
+      <div
+        className={cn(
+          'fixed inset-0 z-40 bg-black/60 transition-opacity duration-300 md:hidden',
+          mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+        )}
+        onClick={onMobileClose}
+        aria-hidden="true"
+      />
+      <div
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 md:hidden transition-transform duration-300',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        {sidebarContent}
+      </div>
+    </>
   );
 }

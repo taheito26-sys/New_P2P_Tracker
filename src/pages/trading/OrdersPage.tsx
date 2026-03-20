@@ -8,6 +8,7 @@ import {
 import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
+import { useIsMobile } from '@/hooks/use-mobile';
 import * as api from '@/lib/api';
 import { AGREEMENT_TEMPLATES, getTemplateRatioLabel, type AgreementTemplate } from '@/lib/deal-templates';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -35,6 +36,7 @@ function OrdersPageSandbox() {
   const actorId = userId || 'demo-user';
   const t = useT();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const initial = useMemo(() => createDemoState({
     lowStockThreshold: settings.lowStockThreshold,
@@ -561,10 +563,10 @@ function OrdersPageSandbox() {
   );
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
 
       {/* ─── TAB BAR ─── */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
+      <div className="mobileTabBar" style={{ borderBottom: '1px solid var(--line)', marginBottom: 2 }}>
         {(['my', 'incoming', 'outgoing'] as const).map(tab => (
           <button
             key={tab}
@@ -600,7 +602,7 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: myKpi.count, qty: myKpi.qty, vol: myKpi.vol, net: myKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>{t('trades')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('fifoCostBasisMargin')}</div>
@@ -616,6 +618,50 @@ function OrdersPageSandbox() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 4h10M7 8h10M7 12h10M7 16h10M7 20h10" /></svg>
                   <div className="empty-t">{t('noTradesYet')}</div>
                   <div className="empty-s">{t('addBatchThenSale')}</div>
+                </div>
+              ) : isMobile ? (
+                <div className="mobileCardList">
+                  {filtered.map(tr => {
+                    const c = derived.tradeCalc.get(tr.id);
+                    const ok = !!c?.ok;
+                    const rev = tr.amountUSDT * tr.sellPriceQAR;
+                    const net = ok ? c!.netQAR : NaN;
+                    const margin = ok && rev > 0 ? c!.netQAR / rev : NaN;
+                    const cn = state.customers.find(x => x.id === tr.customerId)?.name || '';
+                    const isMerchantLinked = isPartnerLinkedTrade(tr);
+                    const linkedRel = isMerchantLinked ? relationships.find(r => r.id === tr.linkedRelId) : null;
+                    const ownershipLabel = !isMerchantLinked ? t('selfTradeLabel') : (tr.createdByUserId || actorId) === actorId ? t('sentTradeLabel') : t('sharedTradeLabel');
+                    return (
+                      <div key={tr.id} className="mobileDataCard">
+                        <div className="mobileDataHead">
+                          <div>
+                            <div className="mobileDataTitle">{cn || '—'}</div>
+                            <div className="mobileDataMeta">
+                              <span className="mono">{fmtDate(tr.ts)}</span>
+                              <span className="pill" style={{ fontSize: 8 }}>{ownershipLabel}</span>
+                              {linkedRel?.counterparty?.display_name && <span className="pill" style={{ fontSize: 8 }}>🤝 {linkedRel.counterparty.display_name}</span>}
+                              {tr.approvalStatus && getApprovalStatusBadge(tr.approvalStatus)}
+                            </div>
+                          </div>
+                          <div className={`mobileDataValue mono ${Number.isFinite(net) ? (net >= 0 ? 'good' : 'bad') : 'muted'}`}>{Number.isFinite(net) ? (net >= 0 ? '+' : '') + fmtQ(net) : '—'}</div>
+                        </div>
+                        <div className="mobileDataGrid">
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('qty')}</div><div className="mobileDataValue mono">{fmtU(tr.amountUSDT)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('sell')}</div><div className="mobileDataValue mono">{fmtP(tr.sellPriceQAR)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('avgBuy')}</div><div className="mobileDataValue mono">{ok ? fmtP(c!.avgBuyQAR) : '—'}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('volume')}</div><div className="mobileDataValue mono">{fmtQ(rev)}</div></div>
+                        </div>
+                        <div className="muted" style={{ fontSize: 9, marginTop: 6 }}>{Number.isFinite(margin) ? `${(margin * 100).toFixed(2)}% ${t('marginLabel')}` : '—'}</div>
+                        <div className="actionsRow" style={{ marginTop: 8 }}>
+                          <button className="rowBtn" onClick={() => setDetailsOpen(prev => ({ ...prev, [tr.id]: !prev[tr.id] }))}>{detailsOpen[tr.id] ? t('hideDetails') : t('details')}</button>
+                          {(!tr.approvalStatus || tr.approvalStatus === 'pending_approval') && <button className="rowBtn" onClick={() => openEdit(tr.id)}>{t('edit')}</button>}
+                          {tr.approvalStatus === 'pending_approval' && <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => handleCancelTrade(tr.id)}>{t('cancel')}</button>}
+                          {tr.approvalStatus === 'approved' && <button className="rowBtn" style={{ color: 'var(--warn)' }} onClick={() => handleCancelTrade(tr.id)}>{t('requestCancellation')}</button>}
+                        </div>
+                        {detailsOpen[tr.id] && <div className="tradeDetail" style={{ margin: '8px 0 0' }}>{renderDetail(tr, c)}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="tableWrap ledgerWrap">
@@ -716,7 +762,7 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: inKpi.count, vol: inKpi.vol, net: inKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>📥 {t('incomingTradeRequestsTitle')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('incomingTradesHelp')}</div>
@@ -729,6 +775,45 @@ function OrdersPageSandbox() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 4h10M7 8h10M7 12h10M7 16h10M7 20h10" /></svg>
                   <div className="empty-t">{t('noIncomingTrades')}</div>
                   <div className="empty-s">{t('incomingTradeRequestsDesc')}</div>
+                </div>
+              ) : isMobile ? (
+                <div className="mobileCardList">
+                  {incomingTradeRequests.map(tr => {
+                    const rel = relationships.find(r => r.id === tr.linkedRelId);
+                    const tmpl = AGREEMENT_TEMPLATES.find(template => template.id === tr.agreementTemplateId);
+                    const rev = tr.amountUSDT * tr.sellPriceQAR;
+                    return (
+                      <div key={tr.id} className="mobileDataCard">
+                        <div className="mobileDataHead">
+                          <div>
+                            <div className="mobileDataTitle">{rel?.counterparty?.display_name || tr.linkedMerchantId || '—'}</div>
+                            <div className="mobileDataMeta"><span className="mono">{fmtDate(tr.ts)}</span></div>
+                          </div>
+                          <span className="pill" style={{ fontSize: 8, color: 'var(--brand)' }}>{tmpl ? `${tmpl.label[t.lang]} (${tmpl.ratioDisplay})` : t('agreementType')}</span>
+                        </div>
+                        <div className="mobileDataGrid">
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('qty')}</div><div className="mobileDataValue mono">{fmtU(tr.amountUSDT)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('sell')}</div><div className="mobileDataValue mono">{fmtP(tr.sellPriceQAR)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('volume')}</div><div className="mobileDataValue mono">{fmtQ(rev)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('actions')}</div><div className="mobileDataValue">{tr.approvalStatus}</div></div>
+                        </div>
+                        <div className="actionsRow" style={{ marginTop: 8 }}>
+                          {tr.approvalStatus === 'pending_approval' && (
+                            <>
+                              <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={() => approveIncomingTrade(tr.id)}>{t('approve')}</button>
+                              <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => rejectIncomingTrade(tr.id)}>{t('reject')}</button>
+                            </>
+                          )}
+                          {tr.approvalStatus === 'cancellation_pending' && (
+                            <>
+                              <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={() => approveCancellation(tr.id)}>{t('approveCancellationAction')}</button>
+                              <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => rejectCancellation(tr.id)}>{t('rejectCancellationAction')}</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="tableWrap ledgerWrap">
@@ -782,7 +867,7 @@ function OrdersPageSandbox() {
             <>
               {renderKpiBar({ count: outKpi.count, qty: outKpi.qty, vol: outKpi.vol, net: outKpi.net })}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 800 }}>📤 {t('outgoingOrders')}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('yourMerchantLinkedTrades')}</div>
@@ -795,6 +880,57 @@ function OrdersPageSandbox() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 4h10M7 8h10M7 12h10M7 16h10M7 20h10" /></svg>
                   <div className="empty-t">{t('noOutgoingTrades')}</div>
                   <div className="empty-s">{t('outgoingTradesDesc')}</div>
+                </div>
+              ) : isMobile ? (
+                <div className="mobileCardList">
+                  {outgoingTrades.map(tr => {
+                    const c = derived.tradeCalc.get(tr.id);
+                    const ok = !!c?.ok;
+                    const rev = tr.amountUSDT * tr.sellPriceQAR;
+                    const net = ok ? c!.netQAR : NaN;
+                    const margin = ok && rev > 0 ? net / rev : NaN;
+                    const linkedRel = relationships.find(r => r.id === tr.linkedRelId);
+                    const merchantName = linkedRel?.counterparty?.display_name || '—';
+                    const cn = state.customers.find(x => x.id === tr.customerId)?.name || '';
+                    return (
+                      <div key={tr.id} className="mobileDataCard">
+                        <div className="mobileDataHead">
+                          <div>
+                            <div className="mobileDataTitle">{merchantName}</div>
+                            <div className="mobileDataMeta">
+                              <span className="mono">{fmtDate(tr.ts)}</span>
+                              {cn && <span className="pill" style={{ fontSize: 8 }}>{cn}</span>}
+                              {tr.approvalStatus && getApprovalStatusBadge(tr.approvalStatus)}
+                            </div>
+                          </div>
+                          <div className={`mobileDataValue mono ${Number.isFinite(net) ? (net >= 0 ? 'good' : 'bad') : 'muted'}`}>{Number.isFinite(net) ? (net >= 0 ? '+' : '') + fmtQ(net) : '—'}</div>
+                        </div>
+                        <div className="mobileDataGrid">
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('qty')}</div><div className="mobileDataValue mono">{fmtU(tr.amountUSDT)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('sell')}</div><div className="mobileDataValue mono">{fmtP(tr.sellPriceQAR)}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('avgBuy')}</div><div className="mobileDataValue mono">{ok ? fmtP(c!.avgBuyQAR) : '—'}</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('volume')}</div><div className="mobileDataValue mono">{fmtQ(rev)}</div></div>
+                        </div>
+                        <div className="muted" style={{ fontSize: 9, marginTop: 6 }}>{Number.isFinite(margin) ? `${(margin * 100).toFixed(2)}% ${t('marginLabel')}` : '—'}</div>
+                        <div className="actionsRow" style={{ marginTop: 8 }}>
+                          <button className="rowBtn" onClick={() => setDetailsOpen(prev => ({ ...prev, [tr.id]: !prev[tr.id] }))}>{detailsOpen[tr.id] ? t('hideDetails') : t('details')}</button>
+                          {(!tr.approvalStatus || tr.approvalStatus === 'pending_approval') && <button className="rowBtn" onClick={() => openEdit(tr.id)}>{t('edit')}</button>}
+                          {(!tr.approvalStatus || tr.approvalStatus === 'pending_approval') && (
+                            <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => {
+                              if (tr.approvalStatus === 'pending_approval') {
+                                handleCancelTrade(tr.id);
+                              } else {
+                                applyState({ ...state, trades: state.trades.filter(x => x.id !== tr.id) });
+                                toast.success(t('tradeCancelled'));
+                              }
+                            }}>{t('delete')}</button>
+                          )}
+                          {tr.approvalStatus === 'approved' && <button className="rowBtn" style={{ color: 'var(--warn)' }} onClick={() => handleCancelTrade(tr.id)}>{t('requestCancellation')}</button>}
+                        </div>
+                        {detailsOpen[tr.id] && <div className="tradeDetail" style={{ margin: '8px 0 0' }}>{renderDetail(tr, c)}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="tableWrap ledgerWrap">
@@ -1170,7 +1306,7 @@ function OrdersPageSandbox() {
         const isLockedTrade = editingTrade ? isPartnerLinkedTrade(editingTrade) : false;
         return (
           <Dialog open={!!editingTradeId} onOpenChange={open => !open && setEditingTradeId(null)}>
-            <DialogContent className="tracker-root" style={{ maxWidth: 500, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--good) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
+            <DialogContent className="tracker-root w-[calc(100vw-1rem)] sm:max-w-[500px]" style={{ background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--good) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
               <DialogHeader style={{ marginBottom: 14 }}>
                 <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('correctTradeTitle')}</DialogTitle>
               </DialogHeader>
@@ -1258,7 +1394,7 @@ function OrdersPageSandbox() {
                 </div>
               </div>
 
-              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
                 {!isLockedTrade && (
                   <button
                     onClick={deleteTrade}
@@ -1267,7 +1403,7 @@ function OrdersPageSandbox() {
                     {t('delete')}
                   </button>
                 )}
-                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap', width: '100%', justifyContent: 'flex-end' }}>
                   <button className="btn secondary" style={{ minWidth: 80 }} onClick={() => setEditingTradeId(null)}>{t('cancel')}</button>
                   {!isLockedTrade && (
                     <button
@@ -1286,7 +1422,7 @@ function OrdersPageSandbox() {
 
       {/* ─── CANCELLATION REQUEST DIALOG ─── */}
       <Dialog open={!!cancelTradeId} onOpenChange={open => !open && setCancelTradeId(null)}>
-        <DialogContent className="tracker-root" style={{ maxWidth: 420, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--warn) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
+        <DialogContent className="tracker-root w-[calc(100vw-1rem)] sm:max-w-[420px]" style={{ background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--warn) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
           <DialogHeader style={{ marginBottom: 14 }}>
             <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('requestCancellationTitle')}</DialogTitle>
           </DialogHeader>
