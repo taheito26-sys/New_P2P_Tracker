@@ -1026,6 +1026,39 @@ merchant.patch('/deals/:id', async (c) => {
   return c.json({ ok: true, deal: await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(c.req.param('id')).first() });
 });
 
+merchant.delete('/deals/:id', async (c) => {
+  const deal = await c.env.DB.prepare('SELECT id, relationship_id FROM merchant_deals WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{ id: string; relationship_id: string }>();
+  if (!deal) return c.json({ error: 'Deal not found' }, 404);
+
+  const access = await relationshipAccess(c, deal.relationship_id);
+  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+
+  const [settlement, profit, approval] = await Promise.all([
+    c.env.DB.prepare('SELECT id FROM merchant_settlements WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
+    c.env.DB.prepare('SELECT id FROM merchant_profit_records WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
+    c.env.DB.prepare('SELECT id FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ? LIMIT 1').bind('deal', deal.id).first<{ id: string }>(),
+  ]);
+
+  if (settlement || profit || approval) {
+    return c.json({ error: 'Deal cannot be deleted once settlement, profit, or approval records exist' }, 409);
+  }
+
+  await c.env.DB.prepare('DELETE FROM merchant_deals WHERE id = ?').bind(deal.id).run();
+
+  await auditLog(c, {
+    relationshipId: deal.relationship_id,
+    actorUserId: c.get('userId'),
+    actorMerchantId: access.myMerchantId,
+    entityType: 'deal',
+    entityId: deal.id,
+    action: 'deleted',
+  });
+
+  return c.json({ ok: true, deleted: deal.id });
+});
+
 merchant.post('/deals/:id/close', async (c) => {
   const deal = await c.env.DB.prepare('SELECT relationship_id FROM merchant_deals WHERE id = ?')
     .bind(c.req.param('id'))

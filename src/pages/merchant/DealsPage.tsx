@@ -84,11 +84,11 @@ export default function DealsPage() {
   const confirmDelete = async () => {
     if (!deleteDealId) return;
     try {
-      await dealsApi.update(deleteDealId, { status: 'cancelled' });
+      await dealsApi.delete(deleteDealId);
       await reload();
       setDeleteDealId(null);
       setEditingDeal(null);
-      toast.success(t('dealCancelled'));
+      toast.success(t('deletedSuccessfully'));
     } catch (err: any) { toast.error(err.message); }
   };
 
