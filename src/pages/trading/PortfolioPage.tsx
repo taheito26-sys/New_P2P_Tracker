@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Batch } from '@/types/domain';
+import { useT } from '@/lib/i18n';
 
 export default function PortfolioPage() {
+  const t = useT();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,9 +34,10 @@ export default function PortfolioPage() {
   }, {} as Record<string, Batch[]>);
 
   return (
-    <div>
-      <PageHeader title="Portfolio" description="Asset batches and positions" />
-      <div className="p-6 space-y-6">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-6">
+        <PageHeader title="Portfolio" description="Asset batches and positions" />
+        <div className="space-y-6">
         {loading && <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
         {!loading && batches.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
@@ -56,7 +59,7 @@ export default function PortfolioPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-4 mb-4 text-center">
+                <div className="mb-4 grid grid-cols-1 gap-3 text-center sm:grid-cols-3">
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Qty</p>
                     <p className="font-display font-bold">{totalQty.toFixed(4)}</p>
@@ -72,7 +75,7 @@ export default function PortfolioPage() {
                 </div>
                 <div className="space-y-1">
                   {assetBatches.map(b => (
-                    <div key={b.id} className="flex items-center justify-between text-sm py-1.5 border-b border-border/50 last:border-0">
+                    <div key={b.id} className="flex flex-col gap-1 border-b border-border/50 py-1.5 text-sm sm:flex-row sm:items-center sm:justify-between last:border-0">
                       <div>
                         <span className="font-mono text-xs text-muted-foreground">{new Date(b.acquired_at).toLocaleDateString()}</span>
                         <span className="ml-2">{b.quantity.toFixed(4)} @ ${b.unit_cost.toFixed(4)}</span>
@@ -87,6 +90,7 @@ export default function PortfolioPage() {
             </Card>
           );
         })}
+        </div>
       </div>
     </div>
   );
