@@ -53,11 +53,11 @@ export default function InvitationsPage() {
   };
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('invitations')} description={t('manageInvites')} />
-      <div className="p-6">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('invitations')} description={t('manageInvites')} />
         <Tabs defaultValue="inbox">
-          <TabsList>
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2">
             <TabsTrigger value="inbox">{t('inbox')} ({inbox.length})</TabsTrigger>
             <TabsTrigger value="sent">{t('sent')} ({sent.length})</TabsTrigger>
           </TabsList>
@@ -72,7 +72,7 @@ export default function InvitationsPage() {
             )}
             {inbox.map(inv => (
               <Card key={inv.id} className="glass">
-                <CardContent className="flex items-center justify-between p-4">
+                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{inv.from_display_name}</p>
@@ -85,7 +85,7 @@ export default function InvitationsPage() {
                     {inv.message && <p className="text-sm mt-2 text-muted-foreground italic">"{inv.message}"</p>}
                   </div>
                   {inv.status === 'pending' && (
-                    <div className="flex gap-2">
+                    <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
                       <Button size="sm" onClick={() => handleAccept(inv.id)} className="gap-1"><Check className="w-3.5 h-3.5" /> {t('accept')}</Button>
                       <Button size="sm" variant="outline" onClick={() => handleReject(inv.id)} className="gap-1"><X className="w-3.5 h-3.5" /> {t('reject')}</Button>
                     </div>
@@ -104,7 +104,7 @@ export default function InvitationsPage() {
             )}
             {sent.map(inv => (
               <Card key={inv.id} className="glass">
-                <CardContent className="flex items-center justify-between p-4">
+                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{t('sent')}: {inv.to_display_name || inv.to_merchant_id}</p>
@@ -113,7 +113,7 @@ export default function InvitationsPage() {
                     <p className="text-xs text-muted-foreground mt-1">{inv.purpose || t('generalCollaboration')}</p>
                   </div>
                   {inv.status === 'pending' && (
-                    <Button size="sm" variant="outline" onClick={() => handleWithdraw(inv.id)} className="gap-1">
+                    <Button size="sm" variant="outline" onClick={() => handleWithdraw(inv.id)} className="gap-1 self-start sm:self-auto">
                       <RotateCcw className="w-3.5 h-3.5" /> {t('withdraw')}
                     </Button>
                   )}

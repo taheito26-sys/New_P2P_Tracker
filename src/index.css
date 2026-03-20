@@ -110,12 +110,21 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: none;
+    min-height: 100dvh;
+  }
+
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-body);
+    margin: 0;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
@@ -123,6 +132,127 @@
   }
   code, pre, .font-mono {
     font-family: var(--font-display);
+  }
+}
+
+.app-shell {
+  width: 100%;
+  max-width: none;
+}
+
+.main-shell {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.app-content-scroll {
+  width: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.app-page-shell {
+  width: 100%;
+  max-width: 100%;
+  padding: 12px;
+}
+
+.app-page-content {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.mobile-bottom-nav {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 2px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--background) / 0.96);
+  backdrop-filter: blur(14px);
+}
+
+.mobile-bottom-nav__item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 14px;
+  padding: 8px 4px;
+  color: hsl(var(--muted-foreground));
+  text-decoration: none;
+}
+
+.mobile-bottom-nav__item.is-active {
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+
+.mobile-bottom-nav__icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.mobile-bottom-nav__icon {
+  width: 18px;
+  height: 18px;
+}
+
+.mobile-bottom-nav__label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.mobile-bottom-nav__badge {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .app-content-scroll {
+    padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-page-shell {
+    padding: 10px;
+  }
+
+  .app-page-content {
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-page-shell {
+    padding: 16px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-page-shell {
+    padding: 18px;
   }
 }
 
