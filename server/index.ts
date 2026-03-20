@@ -1011,16 +1011,21 @@ merchant.delete('/deals/:id', async (c) => {
   const access = await relationshipAccess(c, deal.relationship_id);
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
 
-  const [settlement, profit, approval] = await Promise.all([
+  const [settlement, profit, pendingCloseApproval] = await Promise.all([
     c.env.DB.prepare('SELECT id FROM merchant_settlements WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
     c.env.DB.prepare('SELECT id FROM merchant_profit_records WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
-    c.env.DB.prepare('SELECT id FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ? LIMIT 1').bind('deal', deal.id).first<{ id: string }>(),
+    c.env.DB.prepare('SELECT id FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ? AND status = ? LIMIT 1').bind('deal', deal.id, 'pending').first<{ id: string }>(),
   ]);
 
-  if (settlement || profit || approval) {
-    return c.json({ error: 'Deal cannot be deleted once settlement, profit, or approval records exist' }, 409);
+  if (settlement || profit) {
+    return c.json({ error: 'Deal cannot be deleted once settlement or profit records exist' }, 409);
   }
 
+  if (pendingCloseApproval) {
+    return c.json({ error: 'Deal cannot be deleted while a close approval request is still pending' }, 409);
+  }
+
+  await c.env.DB.prepare('DELETE FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ?').bind('deal', deal.id).run();
   await c.env.DB.prepare('DELETE FROM merchant_deals WHERE id = ?').bind(deal.id).run();
 
   await auditLog(c, {
