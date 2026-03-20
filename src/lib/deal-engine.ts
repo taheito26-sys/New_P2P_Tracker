@@ -44,7 +44,7 @@ export const DEAL_TYPE_CONFIGS: Record<DealType, DealTypeConfig> = {
     eligibleOrderSides: ['sell'],
     requiresApproval: true,
     settlementBehavior: 'periodic',
-    lifecycleSteps: ['draft', 'active', 'settled', 'closed'],
+    lifecycleSteps: ['pending', 'approved'],
     ruleSummaryTemplate: 'Net profit from linked sales is shared {partner_ratio}% to {counterparty_name} (partner) and {merchant_ratio}% to you (merchant). Distributions are calculated {settlement_period}.',
     isLegacy: false,
     allocationBase: 'net_profit',
@@ -63,7 +63,7 @@ export const DEAL_TYPE_CONFIGS: Record<DealType, DealTypeConfig> = {
     eligibleOrderSides: ['sell'],
     requiresApproval: true,
     settlementBehavior: 'periodic',
-    lifecycleSteps: ['draft', 'active', 'settled', 'closed'],
+    lifecycleSteps: ['pending', 'approved'],
     ruleSummaryTemplate: 'This agreement allocates {counterparty_share_pct}% of sale-linked economics to {counterparty_name} (counterparty) and {merchant_share_pct}% to you (merchant). Applies only to linked sell orders.',
     isLegacy: false,
     allocationBase: 'sale_economics',
@@ -83,7 +83,7 @@ export const DEAL_TYPE_CONFIGS: Record<DealType, DealTypeConfig> = {
     eligibleOrderSides: [],
     requiresApproval: true,
     settlementBehavior: 'manual',
-    lifecycleSteps: ['draft', 'active', 'due', 'overdue', 'settled', 'closed'],
+    lifecycleSteps: ['pending', 'approved'],
     ruleSummaryTemplate: 'Legacy advance of {amount} {currency} due on {due_date}.',
     isLegacy: true,
     allocationBase: 'none',
@@ -102,7 +102,7 @@ export const DEAL_TYPE_CONFIGS: Record<DealType, DealTypeConfig> = {
     eligibleOrderSides: ['buy', 'sell'],
     requiresApproval: true,
     settlementBehavior: 'periodic',
-    lifecycleSteps: ['draft', 'active', 'settled', 'closed'],
+    lifecycleSteps: ['pending', 'approved'],
     ruleSummaryTemplate: 'Legacy capital pool of {amount} {currency} with {pool_owner_share_pct}% belonging to {counterparty_name}.',
     isLegacy: true,
     allocationBase: 'sale_economics',
@@ -121,7 +121,7 @@ export const DEAL_TYPE_CONFIGS: Record<DealType, DealTypeConfig> = {
     eligibleOrderSides: [],
     requiresApproval: false,
     settlementBehavior: 'manual',
-    lifecycleSteps: ['draft', 'active', 'settled', 'closed'],
+    lifecycleSteps: ['pending', 'approved'],
     ruleSummaryTemplate: 'Legacy agreement of {amount} {currency}.',
     isLegacy: true,
     allocationBase: 'none',
@@ -181,7 +181,7 @@ export interface DealAllocation {
   totalAmount: number;
   currency: string;
   timestamp: string;
-  status: 'pending' | 'approved' | 'settled';
+  status: 'pending' | 'approved';
 }
 
 /**
@@ -223,13 +223,8 @@ export function calculateAllocation(
 
 export function getAvailableTransitions(status: DealStatus, dealType: DealType): DealStatus[] {
   const transitions: Record<DealStatus, DealStatus[]> = {
-    draft: ['active', 'cancelled'],
-    active: ['due', 'settled', 'closed', 'cancelled'],
-    due: ['overdue', 'settled', 'closed'],
-    settled: ['closed'],
-    closed: [],
-    overdue: ['settled', 'closed', 'cancelled'],
-    cancelled: [],
+    pending: ['approved'],
+    approved: [],
   };
   return transitions[status] || [];
 }
@@ -247,7 +242,7 @@ export function calculateOutstanding(deal: MerchantDeal): {
   const expectedReturn = deal.expected_return || 0;
   const realizedPnl = deal.realized_pnl || 0;
   const outstanding = principal + expectedReturn - realizedPnl;
-  const isOverdue = deal.due_date ? new Date(deal.due_date) < new Date() && deal.status !== 'settled' && deal.status !== 'closed' : false;
+  const isOverdue = false;
 
   return { principal, expectedReturn, realizedPnl, outstanding, isOverdue };
 }

@@ -9,12 +9,10 @@ import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
-import { DEAL_TYPE_CONFIGS, calculateAllocation } from '@/lib/deal-engine';
-import { AGREEMENT_TEMPLATES, getTemplateRatioLabel, getAgreementFamilyLabel, getDealShares, type AgreementTemplate } from '@/lib/deal-templates';
-import { isSupportedDealType } from '@/types/domain';
+import { AGREEMENT_TEMPLATES, getTemplateRatioLabel, type AgreementTemplate } from '@/lib/deal-templates';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import type { MerchantRelationship, MerchantDeal } from '@/types/domain';
+import type { MerchantRelationship } from '@/types/domain';
 import '@/styles/tracker.css';
 import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
 import { isSandboxDataEnabled } from '@/lib/runtime-mode';
@@ -34,6 +32,7 @@ function toInputFromTs(ts: number) { return new Date(ts).toISOString().slice(0, 
 function OrdersPageSandbox() {
   const { settings } = useTheme();
   const { userId } = useAuth();
+  const actorId = userId || 'demo-user';
   const t = useT();
   const navigate = useNavigate();
 
@@ -75,7 +74,6 @@ function OrdersPageSandbox() {
 
   // ─── Merchant-Linked Trade (Trade-Centric) ────────────────────────
   const [relationships, setRelationships] = useState<MerchantRelationship[]>([]);
-  const [allMerchantDeals, setAllMerchantDeals] = useState<MerchantDeal[]>([]);
   const [merchantOrderEnabled, setMerchantOrderEnabled] = useState(false);
   const [linkedRelId, setLinkedRelId] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -83,25 +81,12 @@ function OrdersPageSandbox() {
 
   // Cancellation request dialog
   const [cancelTradeId, setCancelTradeId] = useState<string | null>(null);
-
-  // ─── Merchant Deal Edit (for incoming/outgoing API deals) ─────────
-  const [editingDealId, setEditingDealId] = useState<string | null>(null);
-  const [editDealTitle, setEditDealTitle] = useState('');
-  const [editDealAmount, setEditDealAmount] = useState('');
-  const [editDealQty, setEditDealQty] = useState('');
-  const [editDealSell, setEditDealSell] = useState('');
-  const [editDealFee, setEditDealFee] = useState('0');
-  const [editDealNote, setEditDealNote] = useState('');
-  const [deleteDealConfirm, setDeleteDealConfirm] = useState<string | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
 
   const reloadMerchantData = useCallback(async () => {
     try {
-      const [relationshipsRes, dealsRes] = await Promise.all([
-        api.relationships.list(),
-        api.deals.list(),
-      ]);
+      const relationshipsRes = await api.relationships.list();
       setRelationships(relationshipsRes.relationships);
-      setAllMerchantDeals(dealsRes.deals);
     } catch {
       // keep tracker usable
     }
@@ -139,32 +124,24 @@ function OrdersPageSandbox() {
     });
   }, [list, query, state.customers]);
 
-  // Merchant-linked trades (new trade-centric model)
+  const isPartnerLinkedTrade = useCallback((tr: Trade) => Boolean(tr.isPartnerLinked || tr.agreementFamily || tr.linkedRelId || tr.approvalStatus), []);
+
   const merchantLinkedTrades = useMemo(
-    () => allTrades.filter(tr => !!(tr.agreementFamily || tr.linkedDealId || tr.linkedRelId)),
-    [allTrades],
+    () => allTrades.filter(isPartnerLinkedTrade),
+    [allTrades, isPartnerLinkedTrade],
   );
 
-  // Outgoing: locally-created merchant-linked trades that are still visible
+  const incomingTradeRequests = useMemo(
+    () => merchantLinkedTrades.filter(tr => tr.createdByUserId && tr.createdByUserId !== actorId && (tr.approvalStatus === 'pending_approval' || tr.approvalStatus === 'cancellation_pending')),
+    [actorId, merchantLinkedTrades],
+  );
+
   const outgoingTrades = useMemo(
-    () => merchantLinkedTrades.filter(tr => tr.approvalStatus !== 'cancelled'),
-    [merchantLinkedTrades],
+    () => merchantLinkedTrades.filter(tr => (tr.createdByUserId || actorId) === actorId),
+    [actorId, merchantLinkedTrades],
   );
 
-  // Incoming/Outgoing API deals that are still visible in the review queue/history
-  const partnerMerchantDeals = useMemo(
-    () => allMerchantDeals.filter(d => d.created_by !== userId && d.status !== 'cancelled'),
-    [allMerchantDeals, userId],
-  );
-  const creatorMerchantDeals = useMemo(
-    () => allMerchantDeals.filter(d => d.created_by === userId && d.status !== 'cancelled'),
-    [allMerchantDeals, userId],
-  );
-  const outgoingApiDeals = useMemo(
-    () => creatorMerchantDeals.filter(deal => !outgoingTrades.some(tr => (deal.metadata as any)?.local_trade_id === tr.id)),
-    [creatorMerchantDeals, outgoingTrades],
-  );
-  const outgoingVisibleCount = outgoingTrades.length + outgoingApiDeals.length;
+  const outgoingVisibleCount = outgoingTrades.length;
 
   const filteredCustomers = useMemo(() => {
     const q = normalizeName(buyerName);
@@ -270,11 +247,16 @@ function OrdersPageSandbox() {
       nextCustomers = ensured.customers;
     } else { customerId = ''; }
 
-    // Build trade with agreement fields if merchant-linked
+    // Build trade with embedded agreement fields when partner-linked
     const tmpl = selectedTemplateId ? AGREEMENT_TEMPLATES.find(t => t.id === selectedTemplateId) : null;
+    const rel = relationships.find(r => r.id === linkedRelId);
     const trade: Trade = {
       id: uid(), ts, inputMode: saleMode, amountUSDT, sellPriceQAR: sell, feeQAR: 0, note: '', voided: false, usesStock: useStock, revisions: [], customerId,
+      isPartnerLinked: merchantOrderEnabled,
+      createdByUserId: merchantOrderEnabled ? actorId : undefined,
       linkedRelId: merchantOrderEnabled ? linkedRelId || undefined : undefined,
+      linkedMerchantId: merchantOrderEnabled ? rel?.counterparty?.merchant_id : undefined,
+      counterpartyMerchantId: merchantOrderEnabled ? rel?.counterparty?.merchant_id : undefined,
       agreementFamily: tmpl?.family,
       agreementTemplateId: tmpl?.id,
       partnerPct: tmpl ? (tmpl.defaults.counterparty_share_pct ?? tmpl.defaults.partner_ratio) : undefined,
@@ -285,43 +267,8 @@ function OrdersPageSandbox() {
     const next: TrackerState = { ...state, customers: nextCustomers, trades: [...state.trades, trade], range: inRange(ts, state.range) ? state.range : 'all' };
     applyState(next);
 
-    if (merchantOrderEnabled && tmpl) {
-      // Also create a backend deal record for the counterparty to see
-      try {
-        const customerName = buyerName.trim() || t('buyer');
-        const currency = saleMode === 'QAR' ? 'QAR' : 'USDT';
-        const amount = Number(saleAmount) || 0;
-        const metadata: Record<string, unknown> = {
-          agreement_family: tmpl.family,
-          template_id: tmpl.id,
-          customer_name: customerName,
-          supplier_name: 'System',
-          local_trade_id: trade.id,
-        };
-        if (tmpl.dealType === 'partnership') {
-          metadata.partner_ratio = tmpl.defaults.partner_ratio;
-          metadata.merchant_ratio = tmpl.defaults.merchant_ratio;
-        } else {
-          metadata.counterparty_share_pct = tmpl.defaults.counterparty_share_pct;
-          metadata.merchant_share_pct = tmpl.defaults.merchant_share_pct;
-        }
-        metadata.settlement_period = tmpl.defaults.settlement_period;
-
-        const familyLabel = tmpl.family === 'profit_share' ? 'Profit Share' : 'Sales Deal';
-        const title = `${familyLabel} · ${customerName} · ${tmpl.ratioDisplay}`;
-
-        await api.deals.create({
-          relationship_id: linkedRelId,
-          deal_type: tmpl.dealType,
-          title,
-          amount,
-          currency,
-          metadata,
-        });
-        toast.success(t('tradeSentForApproval'));
-      } catch (err: any) {
-        toast.error(err.message || t('failedCreateDeal'));
-      }
+    if (merchantOrderEnabled) {
+      toast.success(t('tradeSentForApproval'));
     } else {
       setSaleMessage(t('tradeLogged'));
     }
@@ -352,9 +299,8 @@ function OrdersPageSandbox() {
   const openEdit = (id: string) => {
     const tr = state.trades.find(x => x.id === id);
     if (!tr) return;
-    // Block editing approved merchant-linked trades
-    if (tr.approvalStatus === 'approved') {
-      toast.error(t('cannotEditApprovedTrade'));
+    if (isPartnerLinkedTrade(tr)) {
+      toast.error(t('submittedPartnerTradeLocked'));
       return;
     }
     const cn = state.customers.find(c => c.id === tr.customerId)?.name || '';
@@ -371,6 +317,11 @@ function OrdersPageSandbox() {
 
   const saveTradeEdit = () => {
     if (!editingTradeId) return;
+    const lockedTrade = state.trades.find(tr => tr.id === editingTradeId);
+    if (lockedTrade && isPartnerLinkedTrade(lockedTrade)) {
+      toast.error(t('submittedPartnerTradeLocked'));
+      return;
+    }
     const ts = new Date(editDate).getTime();
     const qty = Number(editQty);
     const sell = Number(editSell);
@@ -391,43 +342,55 @@ function OrdersPageSandbox() {
   const deleteTrade = () => {
     if (!editingTradeId) return;
     const tr = state.trades.find(x => x.id === editingTradeId);
-    if (tr?.approvalStatus === 'approved') {
-      toast.error(t('cannotDeleteApprovedTrade'));
+    if (tr && isPartnerLinkedTrade(tr)) {
+      toast.error(t('submittedPartnerTradeLocked'));
       return;
     }
     applyState({ ...state, trades: state.trades.filter(t => t.id !== editingTradeId) });
     setEditingTradeId(null);
   };
 
-  // ─── Cancel / Cancellation Request ────────────────────────────────
   const handleCancelTrade = (tradeId: string) => {
     const tr = state.trades.find(x => x.id === tradeId);
     if (!tr) return;
 
-    if (tr.approvalStatus === 'pending_approval') {
-      // Creator can cancel directly before approval
+    if (tr.approvalStatus === 'pending_approval' && (tr.createdByUserId || actorId) === actorId) {
       const nextTrades = state.trades.map(t =>
         t.id === tradeId ? { ...t, approvalStatus: 'cancelled' as LinkedTradeStatus } : t
       );
       applyState({ ...state, trades: nextTrades });
       toast.success(t('tradeCancelled'));
-    } else if (tr.approvalStatus === 'approved') {
-      // After approval, need cancellation request
+      return;
+    }
+
+    if (tr.approvalStatus === 'approved') {
       setCancelTradeId(tradeId);
+      setCancellationReason('');
     }
   };
 
   const submitCancellationRequest = () => {
     if (!cancelTradeId) return;
+    if (!cancellationReason.trim()) {
+      toast.error(t('cancellationReasonRequired'));
+      return;
+    }
     const nextTrades = state.trades.map(t =>
-      t.id === cancelTradeId ? { ...t, approvalStatus: 'cancellation_pending' as LinkedTradeStatus, cancellationRequestedBy: userId || '' } : t
+      t.id === cancelTradeId ? {
+        ...t,
+        approvalStatus: 'cancellation_pending' as LinkedTradeStatus,
+        cancellationRequestedBy: actorId,
+        cancellationReason: cancellationReason.trim(),
+        cancellationRequestedAt: Date.now(),
+        cancellationDecisions: { ...(t.cancellationDecisions || {}), [actorId]: 'approved' as const },
+      } : t
     );
     applyState({ ...state, trades: nextTrades });
     setCancelTradeId(null);
+    setCancellationReason('');
     toast.success(t('cancellationRequestSent'));
   };
 
-  // Approve an incoming partner trade (from the incoming tab)
   const approveIncomingTrade = (tradeId: string) => {
     const nextTrades = state.trades.map(t =>
       t.id === tradeId ? { ...t, approvalStatus: 'approved' as LinkedTradeStatus } : t
@@ -446,51 +409,26 @@ function OrdersPageSandbox() {
 
   const approveCancellation = (tradeId: string) => {
     const nextTrades = state.trades.map(t =>
-      t.id === tradeId ? { ...t, approvalStatus: 'cancelled' as LinkedTradeStatus } : t
+      t.id === tradeId ? {
+        ...t,
+        approvalStatus: 'cancelled' as LinkedTradeStatus,
+        cancellationDecisions: { ...(t.cancellationDecisions || {}), [actorId]: 'approved' as const },
+      } : t
     );
     applyState({ ...state, trades: nextTrades });
     toast.success(t('tradeCancelled'));
   };
 
-  // ─── Merchant Deal Edit/Delete Handlers ───────────────────────────
-  const openDealEdit = (deal: MerchantDeal) => {
-    setEditingDealId(deal.id);
-    setEditDealTitle(deal.title || '');
-    setEditDealAmount(String(deal.amount || 0));
-    setEditDealQty(String((deal.metadata as any)?.quantity ?? deal.amount ?? ''));
-    setEditDealSell(String((deal.metadata as any)?.sell_price ?? ''));
-    setEditDealFee(String((deal.metadata as any)?.fee ?? '0'));
-    setEditDealNote(String((deal.metadata as any)?.note ?? ''));
-  };
-
-  const saveDealEdit = async () => {
-    if (!editingDealId) return;
-    const qty = Number(editDealQty);
-    const sell = Number(editDealSell);
-    const fee = Number(editDealFee) || 0;
-    if (!(qty > 0) || !(sell > 0)) { toast.error(t('fixFields') + ' ' + t('qty') + ', ' + t('sell')); return; }
-    try {
-      const deal = allMerchantDeals.find(d => d.id === editingDealId);
-      const existingMeta = (deal?.metadata || {}) as Record<string, unknown>;
-      await api.deals.update(editingDealId, {
-        title: editDealTitle,
-        amount: qty * sell,
-        metadata: { ...existingMeta, quantity: qty, sell_price: sell, fee, note: editDealNote },
-      });
-      await reloadMerchantData();
-      setEditingDealId(null);
-      toast.success(t('saveCorrection'));
-    } catch (err: any) { toast.error(err.message); }
-  };
-
-  const deleteDeal = async (dealId: string) => {
-    try {
-      await api.deals.update(dealId, { status: 'cancelled' });
-      await reloadMerchantData();
-      setDeleteDealConfirm(null);
-      setEditingDealId(null);
-      toast.success(t('dealCancelled'));
-    } catch (err: any) { toast.error(err.message); }
+  const rejectCancellation = (tradeId: string) => {
+    const nextTrades = state.trades.map(t =>
+      t.id === tradeId ? {
+        ...t,
+        approvalStatus: 'approved' as LinkedTradeStatus,
+        cancellationDecisions: { ...(t.cancellationDecisions || {}), [actorId]: 'rejected' as const },
+      } : t
+    );
+    applyState({ ...state, trades: nextTrades });
+    toast.success(t('cancellationRejectedStatus'));
   };
 
   const renderDetail = (tr: Trade, c?: TradeCalcResult) => {
@@ -605,12 +543,13 @@ function OrdersPageSandbox() {
 
   const inKpi = useMemo(() => {
     let vol = 0, netVal = 0;
-    for (const deal of partnerMerchantDeals) {
-      vol += deal.amount;
-      if (deal.realized_pnl != null) netVal += deal.realized_pnl;
+    for (const tr of incomingTradeRequests) {
+      const c = derived.tradeCalc.get(tr.id);
+      vol += tr.amountUSDT * tr.sellPriceQAR;
+      if (c?.ok) netVal += c.netQAR;
     }
-    return { count: partnerMerchantDeals.length, vol, net: netVal };
-  }, [partnerMerchantDeals]);
+    return { count: incomingTradeRequests.length, vol, net: netVal };
+  }, [incomingTradeRequests, derived]);
 
   const renderKpiBar = (kpi: { count: number; qty?: number; vol: number; net: number }) => (
     <div style={{ display: 'flex', gap: 16, padding: '8px 12px', background: 'color-mix(in srgb, var(--brand) 5%, transparent)', borderRadius: 6, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -695,8 +634,9 @@ function OrdersPageSandbox() {
                         const margin = ok && rev > 0 ? c!.netQAR / rev : NaN;
                         const pct = Number.isFinite(margin) ? Math.min(1, Math.abs(margin) / 0.05) : 0;
                         const cn = state.customers.find(x => x.id === tr.customerId)?.name || '';
-                        const isMerchantLinked = !!(tr.agreementFamily || tr.linkedDealId || tr.linkedRelId);
+                        const isMerchantLinked = isPartnerLinkedTrade(tr);
                         const linkedRel = isMerchantLinked ? relationships.find(r => r.id === tr.linkedRelId) : null;
+                        const ownershipLabel = !isMerchantLinked ? t('selfTradeLabel') : (tr.createdByUserId || actorId) === actorId ? t('sentTradeLabel') : t('sharedTradeLabel');
                         return (
                           <React.Fragment key={tr.id}>
                             <tr style={isMerchantLinked ? { background: 'color-mix(in srgb, var(--brand) 4%, transparent)' } : undefined}>
@@ -704,6 +644,9 @@ function OrdersPageSandbox() {
                               <div style={{ display: 'flex', gap: 5, alignItems: 'center', minWidth: 0, flexWrap: 'wrap' }}>
                                 <span className="mono" style={{ whiteSpace: 'nowrap' }}>{fmtDate(tr.ts)}</span>
                                 {!ok && <span className="pill bad" style={{ fontSize: 9 }}>!</span>}
+                                <span className="pill" style={{ fontSize: 8, background: isMerchantLinked ? 'color-mix(in srgb, var(--brand) 20%, transparent)' : 'color-mix(in srgb, var(--line) 25%, transparent)', color: isMerchantLinked ? 'var(--brand)' : 'var(--muted)', fontWeight: 700, letterSpacing: '.3px' }}>
+                                  {ownershipLabel}
+                                </span>
                                 {isMerchantLinked && (
                                   <span className="pill" style={{ fontSize: 8, background: 'color-mix(in srgb, var(--brand) 20%, transparent)', color: 'var(--brand)', fontWeight: 700, letterSpacing: '.3px' }}>
                                      🤝 {t('partnerLinked')}
@@ -768,95 +711,60 @@ function OrdersPageSandbox() {
             </>
           )}
 
-          {/* ── INCOMING ORDERS TAB ── */}
+          {/* ── INCOMING TRADE REQUESTS TAB ── */}
           {activeTab === 'incoming' && (
             <>
               {renderKpiBar({ count: inKpi.count, vol: inKpi.vol, net: inKpi.net })}
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 800 }}>📥 {t('incomingOrders')}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('partnerTradesAwaitingApproval')}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>📥 {t('incomingTradeRequestsTitle')}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('incomingTradesHelp')}</div>
                 </div>
-                <span className="pill">{partnerMerchantDeals.length} {t('trades')}</span>
+                <span className="pill">{incomingTradeRequests.length} {t('trades')}</span>
               </div>
 
-              {partnerMerchantDeals.length === 0 ? (
+              {incomingTradeRequests.length === 0 ? (
                 <div className="empty">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 4h10M7 8h10M7 12h10M7 16h10M7 20h10" /></svg>
                   <div className="empty-t">{t('noIncomingTrades')}</div>
-                  <div className="empty-s">{t('incomingTradesDesc')}</div>
+                  <div className="empty-s">{t('incomingTradeRequestsDesc')}</div>
                 </div>
               ) : (
                 <div className="tableWrap ledgerWrap">
                   <table>
                     <thead>
                       <tr>
-                        <th>{t('date')}</th><th>{t('merchant')}</th><th>{t('merchantDealType')}</th><th className="r">{t('qty')}</th><th className="r">{t('avgBuy')}</th><th className="r">{t('sell')}</th><th className="r">{t('volume')}</th><th className="r">{t('net')}</th><th>{t('margin')}</th><th>{t('actions')}</th>
+                        <th>{t('date')}</th><th>{t('merchant')}</th><th>{t('agreementType')}</th><th className="r">{t('qty')}</th><th className="r">{t('sell')}</th><th className="r">{t('volume')}</th><th>{t('actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {partnerMerchantDeals.map(deal => {
-                        const cfg = DEAL_TYPE_CONFIGS[deal.deal_type];
-                        const rel = relationships.find(r => r.id === deal.relationship_id);
-                        const { partnerPct } = getDealShares(deal);
-                        const isDraft = deal.status === 'draft';
-                        const isLegacy = !isSupportedDealType(deal.deal_type);
-                        const dealQty = Number((deal.metadata as any)?.quantity ?? deal.amount ?? 0);
-                        const dealSell = Number((deal.metadata as any)?.sell_price ?? 0);
-                        const dealVol = dealQty * (dealSell || 1);
-                        const dealCost = Number((deal.metadata as any)?.fifo_cost ?? 0);
-                        const dealNet = dealSell > 0 ? dealVol - dealCost : 0;
-                        const dealMargin = dealVol > 0 ? dealNet / dealVol : 0;
-                        const marginPct = Number.isFinite(dealMargin) ? Math.min(1, Math.abs(dealMargin) / 0.05) : 0;
-                        const merchantName = rel?.counterparty?.display_name || '—';
-                        const avgBuy = dealQty > 0 && dealCost > 0 ? dealCost / dealQty : 0;
-
+                      {incomingTradeRequests.map(tr => {
+                        const rel = relationships.find(r => r.id === tr.linkedRelId);
+                        const tmpl = AGREEMENT_TEMPLATES.find(template => template.id === tr.agreementTemplateId);
+                        const rev = tr.amountUSDT * tr.sellPriceQAR;
                         return (
-                          <tr key={deal.id}>
-                            <td><span className="mono">{deal.created_at ? new Date(deal.created_at).toLocaleDateString() : '—'}</span></td>
-                            <td>{merchantName !== '—' ? <span className="tradeBuyerChip" style={{ maxWidth: 130 }}>{merchantName}</span> : <span style={{ color: 'var(--muted)', fontSize: 9 }}>—</span>}</td>
-                            <td>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                                <span>{cfg?.icon}</span>
-                                <span style={{ color: 'var(--brand)', fontWeight: 600, fontSize: 10 }}>{cfg?.label || deal.deal_type}</span>
-                                {partnerPct != null && <span className="pill" style={{ fontSize: 8, color: 'var(--brand)' }}>{partnerPct}%/{100 - partnerPct}%</span>}
-                                {isLegacy && <span className="pill" style={{ fontSize: 7, color: 'var(--muted)' }}>{t('legacyAgreement')}</span>}
-                              </span>
-                            </td>
-                            <td className="mono r">{fmtU(dealQty)}</td>
-                            <td className="mono r">{avgBuy > 0 ? fmtP(avgBuy) : '—'}</td>
-                            <td className="mono r">{dealSell > 0 ? fmtP(dealSell) : '—'}</td>
-                            <td className="mono r">{fmtQ(dealVol)}</td>
-                            <td className="mono r" style={{ color: dealNet >= 0 ? 'var(--good)' : 'var(--bad)', fontWeight: 700 }}>
-                              {dealNet !== 0 ? `${dealNet >= 0 ? '+' : ''}${fmtQ(dealNet)}` : '—'}
-                            </td>
-                            <td>
-                              <div className={`prog ${dealMargin < 0 ? 'neg' : ''}`} style={{ maxWidth: 90 }}><span style={{ width: `${(marginPct * 100).toFixed(0)}%` }} /></div>
-                              <div className="muted" style={{ fontSize: 9, marginTop: 2 }}>{dealMargin !== 0 ? `${(dealMargin * 100).toFixed(2)}% ${t('marginLabel')}` : '—'}</div>
-                            </td>
+                          <tr key={tr.id}>
+                            <td><span className="mono">{fmtDate(tr.ts)}</span></td>
+                            <td>{rel?.counterparty?.display_name || tr.linkedMerchantId || '—'}</td>
+                            <td><span className="pill" style={{ fontSize: 8, color: 'var(--brand)' }}>{tmpl ? `${tmpl.label[t.lang]} (${tmpl.ratioDisplay})` : t('agreementType')}</span></td>
+                            <td className="mono r">{fmtU(tr.amountUSDT)}</td>
+                            <td className="mono r">{fmtP(tr.sellPriceQAR)}</td>
+                            <td className="mono r">{fmtQ(rev)}</td>
                             <td>
                               <div className="actionsRow">
-                                {isDraft && (
+                                {tr.approvalStatus === 'pending_approval' && (
                                   <>
-                                    <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={async () => {
-                                      try {
-                                        await api.deals.update(deal.id, { status: 'active' });
-                                        await reloadMerchantData();
-                                        toast.success(t('tradeApproved'));
-                                      } catch (err: any) { toast.error(err.message); }
-                                    }}>{t('approve')}</button>
-                                    <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={async () => {
-                                      try {
-                                        await api.deals.update(deal.id, { status: 'cancelled' });
-                                        await reloadMerchantData();
-                                        toast.success(t('tradeRejected'));
-                                      } catch (err: any) { toast.error(err.message); }
-                                    }}>{t('reject')}</button>
+                                    <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={() => approveIncomingTrade(tr.id)}>{t('approve')}</button>
+                                    <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => rejectIncomingTrade(tr.id)}>{t('reject')}</button>
                                   </>
                                 )}
-                                <button className="rowBtn" onClick={() => openDealEdit(deal)}>{t('edit')}</button>
-                                <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => setDeleteDealConfirm(deal.id)}>{t('delete')}</button>
+                                {tr.approvalStatus === 'cancellation_pending' && (
+                                  <>
+                                    <button className="rowBtn" style={{ color: 'var(--good)', fontWeight: 700 }} onClick={() => approveCancellation(tr.id)}>{t('approveCancellationAction')}</button>
+                                    <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => rejectCancellation(tr.id)}>{t('rejectCancellationAction')}</button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -959,51 +867,6 @@ function OrdersPageSandbox() {
                               </tr>
                             )}
                           </React.Fragment>
-                        );
-                      })}
-                      {outgoingApiDeals.map(deal => {
-                        const cfg = DEAL_TYPE_CONFIGS[deal.deal_type];
-                        const rel = relationships.find(r => r.id === deal.relationship_id);
-                        const { partnerPct } = getDealShares(deal);
-                        const dealQty = Number((deal.metadata as any)?.quantity ?? deal.amount ?? 0);
-                        const dealSell = Number((deal.metadata as any)?.sell_price ?? 0);
-                        const dealVol = dealQty * (dealSell || 1);
-                        const dealCost = Number((deal.metadata as any)?.fifo_cost ?? 0);
-                        const dealNet = dealSell > 0 ? dealVol - dealCost : 0;
-                        const dealMargin = dealVol > 0 ? dealNet / dealVol : 0;
-                        const marginPct = Number.isFinite(dealMargin) ? Math.min(1, Math.abs(dealMargin) / 0.05) : 0;
-                        const merchantName = rel?.counterparty?.display_name || '—';
-                        const customerName = String((deal.metadata as any)?.customer_name || '');
-                        return (
-                          <tr key={`deal-${deal.id}`}>
-                            <td>
-                              <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
-                                <span className="mono">{deal.created_at ? new Date(deal.created_at).toLocaleDateString() : '—'}</span>
-                                <span className="pill" style={{ fontSize: 8, background: 'color-mix(in srgb, var(--brand) 20%, transparent)', color: 'var(--brand)' }}>{cfg?.icon || 'API'}</span>
-                                <span className="pill" style={{ fontSize: 8 }}>{deal.status}</span>
-                                {partnerPct != null && <span className="pill" style={{ fontSize: 8, color: 'var(--brand)' }}>{partnerPct}%/{100 - partnerPct}%</span>}
-                              </div>
-                            </td>
-                            <td>{merchantName !== '—' ? <span className="tradeBuyerChip" style={{ maxWidth: 130 }}>{merchantName}</span> : <span style={{ color: 'var(--muted)', fontSize: 9 }}>—</span>}</td>
-                            <td>{customerName ? <span className="tradeBuyerChip" style={{ maxWidth: 130 }}>{customerName}</span> : <span style={{ color: 'var(--muted)', fontSize: 9 }}>—</span>}</td>
-                            <td className="mono r">{fmtU(dealQty)}</td>
-                            <td className="mono r">{dealQty > 0 && dealCost > 0 ? fmtP(dealCost / dealQty) : '—'}</td>
-                            <td className="mono r">{dealSell > 0 ? fmtP(dealSell) : '—'}</td>
-                            <td className="mono r">{fmtQ(dealVol)}</td>
-                            <td className="mono r" style={{ color: dealNet >= 0 ? 'var(--good)' : 'var(--bad)', fontWeight: 700 }}>
-                              {dealNet !== 0 ? `${dealNet >= 0 ? '+' : ''}${fmtQ(dealNet)}` : '—'}
-                            </td>
-                            <td>
-                              <div className={`prog ${dealMargin < 0 ? 'neg' : ''}`} style={{ maxWidth: 90 }}><span style={{ width: `${(marginPct * 100).toFixed(0)}%` }} /></div>
-                              <div className="muted" style={{ fontSize: 9, marginTop: 2 }}>{dealMargin !== 0 ? `${(dealMargin * 100).toFixed(2)}% ${t('marginLabel')}` : '—'}</div>
-                            </td>
-                            <td>
-                              <div className="actionsRow">
-                                <button className="rowBtn" onClick={() => openDealEdit(deal)}>{t('edit')}</button>
-                                <button className="rowBtn" style={{ color: 'var(--bad)' }} onClick={() => setDeleteDealConfirm(deal.id)}>{t('delete')}</button>
-                              </div>
-                            </td>
-                          </tr>
                         );
                       })}
                     </tbody>
@@ -1223,54 +1086,47 @@ function OrdersPageSandbox() {
             </div>
           )}
 
-          {/* ── INCOMING: Partner trade details ── */}
+          {/* ── INCOMING: Trade request details ── */}
           {activeTab === 'incoming' && (
             <div className="formPanel salePanel">
-              <div className="hdr">📥 {t('approvalInbox')}</div>
+              <div className="hdr">📥 {t('incomingTradeRequestsTitle')}</div>
               <div className="inner">
-                {partnerMerchantDeals.length === 0 ? (
+                {incomingTradeRequests.length === 0 ? (
                   <div className="muted" style={{ fontSize: 11, textAlign: 'center', padding: 20 }}>{t('noIncomingTrades')}</div>
                 ) : (
                   <div style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1.5 }}>
                     <p>{t('incomingTradesHelp')}</p>
                     <div style={{ marginTop: 12 }}>
-                      {partnerMerchantDeals.filter(d => d.status === 'draft').map(deal => {
-                        const cfg = DEAL_TYPE_CONFIGS[deal.deal_type];
-                        const rel = relationships.find(r => r.id === deal.relationship_id);
-                        const { partnerPct } = getDealShares(deal);
+                      {incomingTradeRequests.map(tr => {
+                        const rel = relationships.find(r => r.id === tr.linkedRelId);
+                        const tmpl = AGREEMENT_TEMPLATES.find(template => template.id === tr.agreementTemplateId);
                         return (
-                          <div key={deal.id} className="previewBox" style={{ marginBottom: 6 }}>
+                          <div key={tr.id} className="previewBox" style={{ marginBottom: 6 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div>
-                                <span style={{ fontWeight: 600, fontSize: 11 }}>{cfg?.icon} {deal.title}</span>
-                                <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
-                                  {rel?.counterparty?.display_name || '—'} · {partnerPct != null ? `${partnerPct}%/${100 - partnerPct}%` : '—'}
-                                </div>
+                                <span style={{ fontWeight: 600, fontSize: 11 }}>{tmpl?.icon || '🤝'} {tmpl ? `${tmpl.label[t.lang]} (${tmpl.ratioDisplay})` : t('agreementType')}</span>
+                                <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>{rel?.counterparty?.display_name || tr.linkedMerchantId || '—'} · {t('tradeImpactExplainer')}</div>
+                                {tr.cancellationReason && <div style={{ fontSize: 9, color: 'var(--warn)', marginTop: 4 }}>{t('cancellationReasonLabel')}: {tr.cancellationReason}</div>}
                               </div>
-                              <div className="mono" style={{ fontWeight: 700, fontSize: 12 }}>{deal.amount.toLocaleString()} {deal.currency}</div>
+                              <div className="mono" style={{ fontWeight: 700, fontSize: 12 }}>{fmtQ(tr.amountUSDT * tr.sellPriceQAR)}</div>
                             </div>
                             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                              <button className="btn" style={{ fontSize: 10, padding: '4px 12px' }} onClick={async () => {
-                                try {
-                                  await api.deals.update(deal.id, { status: 'active' });
-                                  await reloadMerchantData();
-                                  toast.success(t('tradeApproved'));
-                                } catch (err: any) { toast.error(err.message); }
-                              }}>{t('approve')}</button>
-                              <button className="btn secondary" style={{ fontSize: 10, padding: '4px 12px', color: 'var(--bad)' }} onClick={async () => {
-                                try {
-                                  await api.deals.update(deal.id, { status: 'cancelled' });
-                                  await reloadMerchantData();
-                                  toast.success(t('tradeRejected'));
-                                } catch (err: any) { toast.error(err.message); }
-                              }}>{t('reject')}</button>
+                              {tr.approvalStatus === 'pending_approval' && (
+                                <>
+                                  <button className="btn" style={{ fontSize: 10, padding: '4px 12px' }} onClick={() => approveIncomingTrade(tr.id)}>{t('approve')}</button>
+                                  <button className="btn secondary" style={{ fontSize: 10, padding: '4px 12px', color: 'var(--bad)' }} onClick={() => rejectIncomingTrade(tr.id)}>{t('reject')}</button>
+                                </>
+                              )}
+                              {tr.approvalStatus === 'cancellation_pending' && (
+                                <>
+                                  <button className="btn" style={{ fontSize: 10, padding: '4px 12px' }} onClick={() => approveCancellation(tr.id)}>{t('approveCancellationAction')}</button>
+                                  <button className="btn secondary" style={{ fontSize: 10, padding: '4px 12px', color: 'var(--bad)' }} onClick={() => rejectCancellation(tr.id)}>{t('rejectCancellationAction')}</button>
+                                </>
+                              )}
                             </div>
                           </div>
                         );
                       })}
-                      {partnerMerchantDeals.filter(d => d.status === 'draft').length === 0 && (
-                        <div style={{ textAlign: 'center', padding: 12, color: 'var(--muted)' }}>{t('noPendingApprovals')}</div>
-                      )}
                     </div>
                   </div>
                 )}
@@ -1311,7 +1167,7 @@ function OrdersPageSandbox() {
         const editCalc = editingTradeId ? derived.tradeCalc.get(editingTradeId) : null;
         const currentVolume = editingTrade ? editingTrade.amountUSDT * editingTrade.sellPriceQAR : 0;
         const currentNet = editCalc?.ok ? editCalc.netQAR : null;
-        const isApproved = editingTrade?.approvalStatus === 'approved';
+        const isLockedTrade = editingTrade ? isPartnerLinkedTrade(editingTrade) : false;
         return (
           <Dialog open={!!editingTradeId} onOpenChange={open => !open && setEditingTradeId(null)}>
             <DialogContent className="tracker-root" style={{ maxWidth: 500, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--good) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
@@ -1319,13 +1175,13 @@ function OrdersPageSandbox() {
                 <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('correctTradeTitle')}</DialogTitle>
               </DialogHeader>
 
-              {isApproved && (
+              {isLockedTrade && (
                 <div style={{ background: 'color-mix(in srgb, var(--bad) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--bad) 28%, transparent)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--bad)', marginBottom: 14, lineHeight: 1.5 }}>
-                  {t('cannotEditApprovedTrade')}
+                  {t('submittedPartnerTradeLocked')}
                 </div>
               )}
 
-              {!isApproved && (
+              {!isLockedTrade && (
                 <div style={{ background: 'color-mix(in srgb, var(--warn) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--warn) 28%, transparent)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--warn)', marginBottom: 14, lineHeight: 1.5 }}>
                   {t('editInPlaceWarning')}
                 </div>
@@ -1349,12 +1205,12 @@ function OrdersPageSandbox() {
 
               <div className="field2" style={{ marginBottom: 10 }}>
                 <div className="lbl">{t('dateTime')}</div>
-                <div className="inputBox"><input type="datetime-local" value={editDate} onChange={e => setEditDate(e.target.value)} disabled={isApproved} /></div>
+                <div className="inputBox"><input type="datetime-local" value={editDate} onChange={e => setEditDate(e.target.value)} disabled={isLockedTrade} /></div>
               </div>
 
               <div className="field2" style={{ marginBottom: 10 }}>
                 <div className="lbl">{t('buyerLabel')}</div>
-                <select value={editCustomerId} onChange={e => setEditCustomerId(e.target.value)} disabled={isApproved}
+                <select value={editCustomerId} onChange={e => setEditCustomerId(e.target.value)} disabled={isLockedTrade}
                   style={{ width: '100%', padding: '8px 32px 8px 10px', fontSize: 12, borderRadius: 6, border: '1px solid var(--line)', background: 'var(--input-bg)', color: 'var(--text)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
                 >
                   <option value="">{t('noCustomerSelected')}</option>
@@ -1367,21 +1223,21 @@ function OrdersPageSandbox() {
               <div className="g2tight" style={{ marginBottom: 10 }}>
                 <div className="field2">
                   <div className="lbl">{t('qtyUsdt')}</div>
-                  <div className="inputBox"><input inputMode="decimal" value={editQty} onChange={e => setEditQty(e.target.value)} disabled={isApproved} /></div>
+                  <div className="inputBox"><input inputMode="decimal" value={editQty} onChange={e => setEditQty(e.target.value)} disabled={isLockedTrade} /></div>
                 </div>
                 <div className="field2">
                   <div className="lbl">{t('sellPriceQar')}</div>
-                  <div className="inputBox"><input inputMode="decimal" title={editSellDisplay.summary} value={editSellDisplay.display} onChange={e => setEditSell(e.target.value)} disabled={isApproved} /></div>
+                  <div className="inputBox"><input inputMode="decimal" title={editSellDisplay.summary} value={editSellDisplay.display} onChange={e => setEditSell(e.target.value)} disabled={isLockedTrade} /></div>
                 </div>
               </div>
 
               <div className="g2tight" style={{ marginBottom: 10 }}>
                 <div className="field2">
                   <div className="lbl">{t('feeQarLabel')}</div>
-                  <div className="inputBox"><input inputMode="decimal" value={editFee} onChange={e => setEditFee(e.target.value)} disabled={isApproved} /></div>
+                  <div className="inputBox"><input inputMode="decimal" value={editFee} onChange={e => setEditFee(e.target.value)} disabled={isLockedTrade} /></div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 6, gap: 10 }}>
-                  <input type="checkbox" id="editUsesStockChk" checked={editUsesStock} onChange={e => setEditUsesStock(e.target.checked)} disabled={isApproved} style={{ accentColor: 'var(--good)', width: 15, height: 15, cursor: 'pointer', flexShrink: 0, marginBottom: 2 }} />
+                  <input type="checkbox" id="editUsesStockChk" checked={editUsesStock} onChange={e => setEditUsesStock(e.target.checked)} disabled={isLockedTrade} style={{ accentColor: 'var(--good)', width: 15, height: 15, cursor: 'pointer', flexShrink: 0, marginBottom: 2 }} />
                   <label htmlFor="editUsesStockChk" style={{ cursor: 'pointer', lineHeight: 1.3 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{t('useFifoStock')}</div>
                     <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t('deductFromInventory')}</div>
@@ -1396,14 +1252,14 @@ function OrdersPageSandbox() {
                     value={editNote}
                     onChange={e => setEditNote(e.target.value)}
                     rows={2}
-                    disabled={isApproved}
+                    disabled={isLockedTrade}
                     style={{ width: '100%', padding: '7px 10px', resize: 'none', background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
                   />
                 </div>
               </div>
 
               <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                {!isApproved && (
+                {!isLockedTrade && (
                   <button
                     onClick={deleteTrade}
                     style={{ padding: '7px 12px', borderRadius: 6, background: 'color-mix(in srgb, var(--bad) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--bad) 30%, transparent)', color: 'var(--bad)', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
@@ -1413,7 +1269,7 @@ function OrdersPageSandbox() {
                 )}
                 <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
                   <button className="btn secondary" style={{ minWidth: 80 }} onClick={() => setEditingTradeId(null)}>{t('cancel')}</button>
-                  {!isApproved && (
+                  {!isLockedTrade && (
                     <button
                       onClick={saveTradeEdit}
                       style={{ minWidth: 130, padding: '9px 18px', borderRadius: 6, background: 'var(--good)', color: '#000', fontWeight: 700, fontSize: 12, border: 'none', cursor: 'pointer' }}
@@ -1437,116 +1293,25 @@ function OrdersPageSandbox() {
           <div style={{ background: 'color-mix(in srgb, var(--warn) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--warn) 28%, transparent)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--warn)', marginBottom: 14, lineHeight: 1.5 }}>
             {t('cancellationRequestExplainer')}
           </div>
+          <div className="field2" style={{ marginBottom: 14 }}>
+            <div className="lbl">{t('cancellationReasonLabel')}</div>
+            <div className="inputBox" style={{ padding: 0 }}>
+              <textarea
+                value={cancellationReason}
+                onChange={e => setCancellationReason(e.target.value)}
+                rows={3}
+                placeholder={t('cancellationReasonPlaceholder')}
+                style={{ width: '100%', padding: '7px 10px', resize: 'none', background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+          </div>
           <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
-            <button className="btn secondary" onClick={() => setCancelTradeId(null)}>{t('cancel')}</button>
+            <button className="btn secondary" onClick={() => { setCancelTradeId(null); setCancellationReason(''); }}>{t('cancel')}</button>
             <button
               onClick={submitCancellationRequest}
               style={{ padding: '9px 18px', borderRadius: 6, background: 'var(--warn)', color: '#000', fontWeight: 700, fontSize: 12, border: 'none', cursor: 'pointer' }}
             >
               {t('submitCancellationRequest')}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── MERCHANT DEAL EDIT DIALOG ─── */}
-      {(() => {
-        const editingDeal = editingDealId ? allMerchantDeals.find(d => d.id === editingDealId) : null;
-        if (!editingDeal) return null;
-        const dealVol = Number(editDealQty) * Number(editDealSell);
-        const dealCost = Number((editingDeal.metadata as any)?.fifo_cost ?? 0);
-        const dealNet = dealVol - dealCost - Number(editDealFee);
-        return (
-          <Dialog open={!!editingDealId} onOpenChange={open => !open && setEditingDealId(null)}>
-            <DialogContent className="tracker-root" style={{ maxWidth: 500, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--good) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
-              <DialogHeader style={{ marginBottom: 14 }}>
-                <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('correctTradeTitle')}</DialogTitle>
-              </DialogHeader>
-
-              <div style={{ background: 'color-mix(in srgb, var(--warn) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--warn) 28%, transparent)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--warn)', marginBottom: 14, lineHeight: 1.5 }}>
-                {t('editInPlaceWarning')}
-              </div>
-
-              <div style={{ background: 'color-mix(in srgb, var(--good) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--good) 25%, transparent)', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-                <div style={{ fontSize: 8, fontWeight: 800, letterSpacing: '.7px', textTransform: 'uppercase', color: 'var(--good)', marginBottom: 8 }}>{t('currentStatsLabel')}</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text)' }}>Volume</span>
-                  <strong style={{ fontFamily: 'var(--lt-font-mono)', fontSize: 13, color: 'var(--text)' }}>{fmtQ(Number.isFinite(dealVol) ? dealVol : 0)}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: 'var(--text)' }}>Net</span>
-                  <strong style={{ fontFamily: 'var(--lt-font-mono)', fontSize: 13, color: Number.isFinite(dealNet) ? (dealNet >= 0 ? 'var(--good)' : 'var(--bad)') : 'var(--muted)' }}>
-                    {Number.isFinite(dealNet) ? `${dealNet >= 0 ? '+' : ''}${fmtQ(dealNet)}` : '—'}
-                  </strong>
-                </div>
-              </div>
-
-              <div className="g2tight" style={{ marginBottom: 10 }}>
-                <div className="field2">
-                  <div className="lbl">{t('qtyUsdt')}</div>
-                  <div className="inputBox"><input inputMode="decimal" value={editDealQty} onChange={e => setEditDealQty(e.target.value)} /></div>
-                </div>
-                <div className="field2">
-                  <div className="lbl">{t('sellPriceQar')}</div>
-                  <div className="inputBox"><input inputMode="decimal" value={editDealSell} onChange={e => setEditDealSell(e.target.value)} /></div>
-                </div>
-              </div>
-
-              <div className="field2" style={{ marginBottom: 10 }}>
-                <div className="lbl">{t('feeQarLabel')}</div>
-                <div className="inputBox"><input inputMode="decimal" value={editDealFee} onChange={e => setEditDealFee(e.target.value)} /></div>
-              </div>
-
-              <div className="field2" style={{ marginBottom: 16 }}>
-                <div className="lbl">{t('note')}</div>
-                <div className="inputBox" style={{ padding: 0 }}>
-                  <textarea
-                    value={editDealNote}
-                    onChange={e => setEditDealNote(e.target.value)}
-                    rows={2}
-                    style={{ width: '100%', padding: '7px 10px', resize: 'none', background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <button
-                  onClick={() => setDeleteDealConfirm(editingDealId)}
-                  style={{ padding: '7px 12px', borderRadius: 6, background: 'color-mix(in srgb, var(--bad) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--bad) 30%, transparent)', color: 'var(--bad)', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
-                >
-                  {t('delete')}
-                </button>
-                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-                  <button className="btn secondary" style={{ minWidth: 80 }} onClick={() => setEditingDealId(null)}>{t('cancel')}</button>
-                  <button
-                    onClick={saveDealEdit}
-                    style={{ minWidth: 130, padding: '9px 18px', borderRadius: 6, background: 'var(--good)', color: '#000', fontWeight: 700, fontSize: 12, border: 'none', cursor: 'pointer' }}
-                  >
-                    {t('saveCorrection')}
-                  </button>
-                </div>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        );
-      })()}
-
-      {/* ─── DELETE DEAL CONFIRMATION DIALOG ─── */}
-      <Dialog open={!!deleteDealConfirm} onOpenChange={open => !open && setDeleteDealConfirm(null)}>
-        <DialogContent className="tracker-root" style={{ maxWidth: 420, background: 'var(--bg)', border: '1px solid color-mix(in srgb, var(--bad) 25%, var(--line))', borderRadius: 12, padding: 24, gap: 0 }}>
-          <DialogHeader style={{ marginBottom: 14 }}>
-            <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('confirmDeleteDeal')}</DialogTitle>
-          </DialogHeader>
-          <div style={{ background: 'color-mix(in srgb, var(--bad) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--bad) 28%, transparent)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--bad)', marginBottom: 14, lineHeight: 1.5 }}>
-            {t('deleteDealWarning')}
-          </div>
-          <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
-            <button className="btn secondary" onClick={() => setDeleteDealConfirm(null)}>{t('cancel')}</button>
-            <button
-              onClick={() => deleteDealConfirm && deleteDeal(deleteDealConfirm)}
-              style={{ padding: '9px 18px', borderRadius: 6, background: 'var(--bad)', color: '#fff', fontWeight: 700, fontSize: 12, border: 'none', cursor: 'pointer' }}
-            >
-              {t('delete')}
             </button>
           </DialogFooter>
         </DialogContent>

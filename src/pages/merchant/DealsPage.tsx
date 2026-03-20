@@ -8,18 +8,25 @@ import { Badge } from '@/components/ui/badge';
 import { Briefcase } from 'lucide-react';
 import { getAgreementFamilyLabel, getDealShares } from '@/lib/deal-templates';
 import { isSupportedDealType } from '@/types/domain';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { getAllowedDealStatusTransitions, normalizeDealStatus } from '@/lib/merchant-deal-status';
 import type { MerchantDeal, MerchantRelationship } from '@/types/domain';
 
 const statusColors: Record<string, string> = {
-  draft: 'bg-muted text-muted-foreground',
-  active: 'bg-success text-success-foreground',
-  due: 'bg-warning text-warning-foreground',
-  settled: 'bg-primary text-primary-foreground',
-  closed: 'bg-secondary text-secondary-foreground',
-  overdue: 'bg-destructive text-destructive-foreground',
-  cancelled: 'bg-muted text-muted-foreground',
+  pending: 'bg-warning text-warning-foreground',
+  approved: 'bg-success text-success-foreground',
 };
+
+function canDeleteDeal(deal: MerchantDeal): boolean {
+  return normalizeDealStatus(deal.status) === 'pending' && deal.realized_pnl == null && !deal.close_date;
+}
+
+function getDeleteLockReason(deal: MerchantDeal): string {
+  if (deal.realized_pnl != null) return 'History recorded';
+  if (deal.close_date) return 'Already closed';
+  if (normalizeDealStatus(deal.status) === 'approved') return 'Approved deal';
+  return 'Locked';
+}
 
 export default function DealsPage() {
   const { userId } = useAuth();
@@ -59,7 +66,7 @@ export default function DealsPage() {
     setEditingDeal(deal);
     setEditTitle(deal.title || '');
     setEditAmount(String(deal.amount || 0));
-    setEditStatus(deal.status || 'draft');
+    setEditStatus(normalizeDealStatus(deal.status));
     setEditNote(String((deal.metadata as any)?.note || ''));
   };
 
@@ -84,12 +91,24 @@ export default function DealsPage() {
   const confirmDelete = async () => {
     if (!deleteDealId) return;
     try {
-      await dealsApi.update(deleteDealId, { status: 'cancelled' });
+      await dealsApi.deletePermanent(deleteDealId);
       await reload();
       setDeleteDealId(null);
       setEditingDeal(null);
-      toast.success(t('dealCancelled'));
-    } catch (err: any) { toast.error(err.message); }
+      toast.success(t('deletedSuccessfully'));
+    } catch (err: any) {
+      if (err?.status === 409) {
+        const blockers = err?.body?.detail?.blockers as Array<{ kind: string; id: string; reason: string }> | undefined;
+        if (blockers?.length) {
+          const summary = blockers.map((blocker) => `${blocker.kind}:${blocker.id}`).join(', ');
+          toast.error(`Deletion blocked by linked records: ${summary}`);
+          return;
+        }
+        toast.error(err?.message || 'This deal can no longer be deleted. Review any linked settlement, profit, or approval records instead.');
+        return;
+      }
+      toast.error(err.message);
+    }
   };
 
   return (
@@ -127,7 +146,8 @@ export default function DealsPage() {
                   const isLegacy = !isSupportedDealType(deal.deal_type);
                   const merchantName = relationship?.counterparty?.display_name || '—';
                   const customerName = String((deal.metadata as any)?.customer_name || '');
-                  const isCancelled = deal.status === 'cancelled';
+                  const deletable = canDeleteDeal(deal);
+                  const normalizedStatus = normalizeDealStatus(deal.status);
 
                   return (
                     <tr key={deal.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
@@ -144,7 +164,7 @@ export default function DealsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`text-xs ${statusColors[deal.status] || statusColors.draft}`}>{deal.status}</Badge>
+                        <Badge className={`text-xs ${statusColors[normalizedStatus] || statusColors.pending}`}>{normalizedStatus}</Badge>
                         {isLegacy && <Badge variant="secondary" className="text-xs ml-1">{t('legacyAgreement')}</Badge>}
                       </td>
                       <td className="px-4 py-3">
@@ -178,13 +198,15 @@ export default function DealsPage() {
                           >
                             {t('edit')}
                           </button>
-                          {!isCancelled && (
+                          {deletable ? (
                             <button
                               onClick={() => setDeleteDealId(deal.id)}
                               className="px-3 py-1.5 text-xs font-medium rounded-md border border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10 transition-colors"
                             >
                               {t('delete')}
                             </button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{getDeleteLockReason(deal)}</span>
                           )}
                         </div>
                       </td>
@@ -202,6 +224,9 @@ export default function DealsPage() {
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="text-base font-bold">{t('correctTradeTitle')}</DialogTitle>
+            <DialogDescription>
+              Review the current agreement details and update the status using the strict pending/approved workflow.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
@@ -253,11 +278,11 @@ export default function DealsPage() {
                   onChange={e => setEditStatus(e.target.value)}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 >
-                  <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                  <option value="closed">Closed</option>
-                  <option value="settled">Settled</option>
-                  <option value="cancelled">Cancelled</option>
+                  {[normalizeDealStatus(editingDeal?.status), ...getAllowedDealStatusTransitions(editingDeal?.status)]
+                    .filter((status, index, arr): status is string => Boolean(status) && arr.indexOf(status) === index)
+                    .map(status => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
                 </select>
               </div>
             </div>
@@ -274,12 +299,16 @@ export default function DealsPage() {
           </div>
 
           <DialogFooter className="mt-4 flex-row justify-between items-center">
-            <button
-              onClick={() => editingDeal && setDeleteDealId(editingDeal.id)}
-              className="px-3 py-2 rounded-md border border-destructive/30 bg-destructive/5 text-destructive text-xs font-semibold hover:bg-destructive/10 transition-colors"
-            >
-              {t('delete')}
-            </button>
+            {editingDeal && canDeleteDeal(editingDeal) ? (
+              <button
+                onClick={() => setDeleteDealId(editingDeal.id)}
+                className="px-3 py-2 rounded-md border border-destructive/30 bg-destructive/5 text-destructive text-xs font-semibold hover:bg-destructive/10 transition-colors"
+              >
+                {t('delete')}
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground">Deletion is available only while the deal is still pending and has no recorded history.</span>
+            )}
             <div className="flex gap-2 ml-auto">
               <button
                 onClick={() => setEditingDeal(null)}
@@ -303,6 +332,9 @@ export default function DealsPage() {
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
             <DialogTitle className="text-base font-bold">{t('confirmDeleteDeal')}</DialogTitle>
+            <DialogDescription>
+              This permanently removes the pending deal record if no linked approvals, settlement entries, or profit records exist.
+            </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {t('deleteDealWarning')}
