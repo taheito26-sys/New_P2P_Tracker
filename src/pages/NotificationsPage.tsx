@@ -36,13 +36,14 @@ export default function NotificationsPage() {
   };
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('notificationsTitle')} description={t('allNotifications')}>
-        <Button variant="outline" size="sm" onClick={markAllRead} className="gap-1">
-          <CheckCheck className="w-4 h-4" /> {t('markAllRead')}
-        </Button>
-      </PageHeader>
-      <div className="p-6 space-y-2">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('notificationsTitle')} description={t('allNotifications')}>
+          <Button variant="outline" size="sm" onClick={markAllRead} className="gap-1">
+            <CheckCheck className="w-4 h-4" /> {t('markAllRead')}
+          </Button>
+        </PageHeader>
+        <div className="space-y-2">
         {loading && <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
         {!loading && notifs.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
@@ -52,7 +53,7 @@ export default function NotificationsPage() {
         )}
         {notifs.map(n => (
           <Card key={n.id} className={`glass ${!n.read_at ? 'border-primary/30' : ''}`}>
-            <CardContent className="flex items-center justify-between p-3">
+            <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <div className={`w-2 h-2 rounded-full ${n.read_at ? 'bg-muted-foreground/30' : 'bg-primary animate-pulse-glow'}`} />
                 <div>
@@ -65,6 +66,7 @@ export default function NotificationsPage() {
             </CardContent>
           </Card>
         ))}
+        </div>
       </div>
     </div>
   );

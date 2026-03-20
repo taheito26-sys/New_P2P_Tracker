@@ -1,26 +1,20 @@
 import { useMemo, useState } from 'react';
-import { createDemoState } from '@/lib/tracker-demo-data';
+import { createTrackerState } from '@/lib/tracker-demo-data';
 import {
   fmtQ, fmtU, fmtP, fmtPct, fmtQWithUnit,
 } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
 import '@/styles/tracker.css';
-import { SandboxOnlyNotice } from '@/components/SandboxOnlyNotice';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
 
 export default function CalendarPage() {
-  if (!isSandboxDataEnabled()) {
-    return <SandboxOnlyNotice title="Calendar sandbox data is disabled" description="Synthetic calendar data is available only in local development sandbox mode." />;
-  }
-
-  return <CalendarPageSandbox />;
+  return <CalendarPageWorkspace />;
 }
 
-function CalendarPageSandbox() {
+function CalendarPageWorkspace() {
   const { settings } = useTheme();
   const t = useT();
-  const { state, derived } = useMemo(() => createDemoState({
+  const { state, derived } = useMemo(() => createTrackerState({
     lowStockThreshold: settings.lowStockThreshold,
     priceAlertThreshold: settings.priceAlertThreshold,
   }), [settings.lowStockThreshold, settings.priceAlertThreshold]);
@@ -88,7 +82,7 @@ function CalendarPageSandbox() {
   const selectDay = (d: number) => setCal(prev => ({ ...prev, selectedDay: prev.selectedDay === d ? null : d }));
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       {/* Stats */}
       <div className="cal-stats">
         <div className="cal-stat">
@@ -125,7 +119,7 @@ function CalendarPageSandbox() {
       <div className="panel">
         <div className="panel-head">
           <h2>{mn[month]} {year}</h2>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button className="btn secondary" onClick={prevMonth}>{t('prev')}</button>
             <button className="btn secondary" onClick={goToday}>{t('today')}</button>
             <button className="btn secondary" onClick={nextMonth}>{t('next')}</button>

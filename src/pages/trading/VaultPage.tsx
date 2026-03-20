@@ -445,13 +445,14 @@ export default function VaultPage() {
   };
 
   return (
-    <div className="tracker-page" dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader 
-        title={t('vaultTitle')} 
-        description={t('vaultSub')} 
-      />
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader
+          title={t('vaultTitle')}
+          description={t('vaultSub')}
+        />
 
-      <div className="p-6 space-y-4">
+        <div className="space-y-4">
         {/* Ring 1 + Ring 2 side by side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* ── Ring 1: Local IndexedDB ── */}
@@ -739,6 +740,7 @@ export default function VaultPage() {
               </div>
             </CardContent>
           </Card>
+        </div>
         </div>
       </div>
     </div>
