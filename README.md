@@ -21,7 +21,8 @@ npm install
 
 - replace the example KV namespace ID and D1 database ID with your own values
 - set `vars.APP_ENV` to `development` locally and `production` in production
-- set `vars.ALLOWED_ORIGINS` to an explicit comma-separated frontend allowlist
+- if your frontend is on a separate origin, set `vars.ALLOWED_ORIGINS` to an explicit comma-separated allowlist
+- same-origin deployments work without adding a separate origin allowlist entry
 - do not use `*` for production origins
 
 3. Initialize the local database:
@@ -60,7 +61,7 @@ npm run lint
 ## Deploy
 
 1. Apply D1 migrations to the target environment.
-2. Configure KV, D1, `APP_ENV=production`, and a strict `ALLOWED_ORIGINS` allowlist.
+2. Configure KV, D1, `APP_ENV=production`, and set `ALLOWED_ORIGINS` only when your frontend is hosted on a separate trusted origin.
 3. Deploy the Worker:
 
 ```sh

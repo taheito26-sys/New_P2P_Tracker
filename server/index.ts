@@ -95,25 +95,33 @@ function isProductionEnv(c: Context<{ Bindings: Bindings }>): boolean {
   return appEnv(c) === 'production';
 }
 
+function requestOrigin(c: Context<{ Bindings: Bindings }>): string {
+  const url = new URL(c.req.url);
+  return url.origin;
+}
+
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
   const configured = (c.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  if (configured.length > 0) {
-    return configured.filter((origin) => origin !== '*');
+  const sanitized = configured.filter((origin) => origin !== '*');
+  const sameOrigin = requestOrigin(c);
+
+  if (sanitized.length > 0) {
+    return Array.from(new Set([...sanitized, sameOrigin]));
   }
 
   if (isProductionEnv(c)) {
-    return [];
+    return [sameOrigin];
   }
 
-  return Array.from(LOCAL_DEV_ORIGINS);
+  return Array.from(new Set([...LOCAL_DEV_ORIGINS, sameOrigin]));
 }
 
 function originAllowed(origins: string[], origin: string | undefined): boolean {
-  if (!origin) return false;
+  if (!origin) return true;
   if (origins.length === 0) return false;
   return origins.includes(origin);
 }
