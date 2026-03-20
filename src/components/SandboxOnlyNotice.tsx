@@ -15,7 +15,7 @@ export function SandboxOnlyNotice({ title, description }: SandboxOnlyNoticeProps
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            This view is intentionally available only in local/development sandbox mode.
+            This view is blocked by governance policy until live or user-provided data is configured for this environment.
           </p>
         </CardContent>
       </Card>
