@@ -106,9 +106,10 @@ export default function DealsPage() {
   };
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('dealsLabel')} description={t('allDealsAcross')} />
-      <div className="p-6">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('dealsLabel')} description={t('allDealsAcross')} />
+        <div>
         {allDeals.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -210,6 +211,7 @@ export default function DealsPage() {
             </table>
           </div>
         )}
+        </div>
       </div>
 
       {/* ─── EDIT DEAL DIALOG ─── */}

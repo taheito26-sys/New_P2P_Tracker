@@ -4,6 +4,7 @@
 // Supports Qatar (QAR), UAE (AED), Egypt (EGP) markets.
 
 import type { P2PSnapshot, P2PHistoryPoint, P2POffer } from '@/types/domain';
+import { assertSyntheticSandboxAccess } from '@/lib/governance';
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 const HISTORY_DAYS = 15;
@@ -108,6 +109,7 @@ function computeStats(offers: P2POffer[], side: 'sell' | 'buy') {
 }
 
 export function generateP2PHistory(market: string = 'qatar'): { snapshot: P2PSnapshot; history: P2PHistoryPoint[] } {
+  assertSyntheticSandboxAccess('Synthetic P2P market data');
   const config = MARKET_CONFIGS[market] || MARKET_CONFIGS.qatar;
   const rng = seededRandom(config.seed);
   const now = Date.now();

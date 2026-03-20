@@ -33,10 +33,10 @@ export default function DirectoryPage() {
   };
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('platformDirectory')} description={t('discoverMerchants')} />
-      <div className="p-6 space-y-6">
-        <form onSubmit={handleSearch} className="flex gap-2">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-6">
+        <PageHeader title={t('platformDirectory')} description={t('discoverMerchants')} />
+        <form onSubmit={handleSearch} className="flex flex-col gap-2 sm:flex-row">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
@@ -61,7 +61,7 @@ export default function DirectoryPage() {
         <div className="grid gap-3">
           {results.map(r => (
             <Card key={r.id} className="glass hover:border-primary/50 transition-colors">
-              <CardContent className="flex items-center justify-between p-4">
+              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="font-medium">{r.display_name}</p>
@@ -73,7 +73,7 @@ export default function DirectoryPage() {
                     {r.region && <span className="text-xs text-muted-foreground">{r.region}</span>}
                   </div>
                 </div>
-                <Button size="sm" variant="outline" className="gap-1">
+                <Button size="sm" variant="outline" className="gap-1 self-start sm:self-auto">
                   <UserPlus className="w-3.5 h-3.5" /> {t('invite')}
                 </Button>
               </CardContent>
