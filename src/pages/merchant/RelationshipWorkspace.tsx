@@ -147,16 +147,26 @@ function RelationshipWorkspaceCore() {
 
   const settlingDeal = relDeals.find(d => d.id === settleDealId);
   const isPartnershipSettle = settlingDeal?.deal_type === 'partnership';
+  const parsedSettlementAmount = Number.parseFloat(settlementForm.amount);
+  const parsedProfitAmount = Number.parseFloat(settlementForm.profit);
+  const canSubmitSettlement = isPartnershipSettle
+    ? parsedProfitAmount > 0
+    : parsedSettlementAmount > 0;
 
   const handleSubmitSettlement = async () => {
-    if (!settlementForm.amount || submittingSettlement || settlementSubmitLock.current) return;
+    if (!canSubmitSettlement || submittingSettlement || settlementSubmitLock.current) {
+      if (!submittingSettlement && !settlementSubmitLock.current) {
+        toast.error(isPartnershipSettle ? 'Enter a positive profit amount before submitting.' : 'Enter a positive settlement amount before submitting.');
+      }
+      return;
+    }
     settlementSubmitLock.current = true;
     setSubmittingSettlement(true);
     try {
-      const settleAmount = isPartnershipSettle ? 0 : parseFloat(settlementForm.amount);
+      const settleAmount = isPartnershipSettle ? 0 : parsedSettlementAmount;
       await api.deals.submitSettlement(settleDealId, { amount: settleAmount, note: settlementForm.note });
-      if (settlementForm.profit && parseFloat(settlementForm.profit) > 0) {
-        await api.deals.recordProfit(settleDealId, { amount: parseFloat(settlementForm.profit), period_key: settlementForm.period_key, note: settlementForm.note });
+      if (parsedProfitAmount > 0) {
+        await api.deals.recordProfit(settleDealId, { amount: parsedProfitAmount, period_key: settlementForm.period_key, note: settlementForm.note });
       }
       await api.deals.close(settleDealId, { note: isPartnershipSettle ? 'Profit-share deal closed — capital retained by merchant' : 'Auto-closed on settlement submission' });
       toast.success('Settlement submitted — deal will close once approved');
@@ -461,7 +471,7 @@ function RelationshipWorkspaceCore() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSettlementOpen(false)} disabled={submittingSettlement}>{t('cancel')}</Button>
-            <Button onClick={handleSubmitSettlement} disabled={submittingSettlement}>
+            <Button onClick={handleSubmitSettlement} disabled={submittingSettlement || !canSubmitSettlement}>
               {submittingSettlement ? 'Submitting...' : t('submitForApproval')}
             </Button>
           </DialogFooter>
