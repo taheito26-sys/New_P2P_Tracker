@@ -16,6 +16,7 @@ import {
 } from '@/lib/tracker-helpers';
 import { useTheme } from '@/lib/theme-context';
 import { useT } from '@/lib/i18n';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,7 @@ function inputFromTs(ts: number) {
 function StockPageSandbox() {
   const { settings, update } = useTheme();
   const t = useT();
+  const isMobile = useIsMobile();
 
   const initial = useMemo(() => createDemoState({
     lowStockThreshold: settings.lowStockThreshold,
@@ -245,10 +247,10 @@ function StockPageSandbox() {
   };
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       <div className="twoColPage">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 800 }}>{t('batches')}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t('fifoProgress')}</div>
@@ -265,6 +267,55 @@ function StockPageSandbox() {
               </svg>
               <div className="empty-t">{t('noBatchesShort')}</div>
               <div className="empty-s">{t('addFirstPurchase')}</div>
+            </div>
+          ) : isMobile ? (
+            <div className="mobileCardList">
+              {perf.map((b) => {
+                const rem = Number.isFinite(b.remaining) ? b.remaining : b.initialUSDT;
+                const pct = b.initialUSDT > 0 ? rem / b.initialUSDT : 0;
+                const prog = Math.max(0, Math.min(100, pct * 100));
+                const ct = batchCycleTime(state, derived, b.id);
+                const st = rem <= 1e-9 ? t('depleted') : rem < b.initialUSDT ? t('partial') : t('fresh');
+                const stCls = rem <= 1e-9 ? 'bad' : rem < b.initialUSDT ? 'warn' : 'good';
+                return (
+                  <div key={b.id} className="mobileDataCard">
+                    <div className="mobileDataHead">
+                      <div>
+                        <div className="mobileDataTitle">{b.source || '—'}</div>
+                        <div className="mobileDataMeta">
+                          <span className="mono">{fmtDate(b.ts)}</span>
+                          {ct !== null && <span className="cycle-badge">{fmtDur(ct)}</span>}
+                        </div>
+                      </div>
+                      <span className={`pill ${stCls}`}>{st}</span>
+                    </div>
+                    <div className="mobileDataGrid">
+                      <div className="mobileDataItem"><div className="mobileDataLabel">{t('total')}</div><div className="mobileDataValue mono">{fmtU(b.initialUSDT)}</div></div>
+                      <div className="mobileDataItem"><div className="mobileDataLabel">{t('buy')}</div><div className="mobileDataValue mono">{fmtP(b.buyPriceQAR)}</div></div>
+                      <div className="mobileDataItem"><div className="mobileDataLabel">{t('rem')}</div><div className="mobileDataValue mono">{fmtU(rem)}</div></div>
+                      <div className="mobileDataItem"><div className="mobileDataLabel">{t('profit')}</div><div className={`mobileDataValue mono ${(b.profit || 0) >= 0 ? 'good' : 'bad'}`}>{(b.profit || 0) >= 0 ? '+' : ''}{fmtQ(b.profit || 0)}</div></div>
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <div className="prog"><span style={{ width: `${prog.toFixed(0)}%` }} /></div>
+                      <div className="muted" style={{ fontSize: 9, marginTop: 2 }}>{prog.toFixed(0)}% {t('remainingPct')}</div>
+                    </div>
+                    <div className="actionsRow" style={{ marginTop: 8 }}>
+                      <button className="rowBtn" onClick={() => setDetailsOpen(prev => ({ ...prev, [b.id]: !prev[b.id] }))}>{detailsOpen[b.id] ? t('hideDetails') : t('details')}</button>
+                      <button className="rowBtn" onClick={() => openEdit(b.id)}>{t('edit')}</button>
+                    </div>
+                    {detailsOpen[b.id] && (
+                      <div className="tradeDetail" style={{ margin: '8px 0 0' }}>
+                        <div className="mobileDataGrid">
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('batchQty')}</div><div className="mobileDataValue">{fmtU(b.initialUSDT)} USDT</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('batchBuyPrice')}</div><div className="mobileDataValue">{fmtP(b.buyPriceQAR)} QAR</div></div>
+                          <div className="mobileDataItem"><div className="mobileDataLabel">{t('cost')}</div><div className="mobileDataValue">{fmtQ(b.initialUSDT * b.buyPriceQAR)} QAR</div></div>
+                          {b.note && <div className="mobileDataItem"><div className="mobileDataLabel">{t('batchNotes')}</div><div className="mobileDataValue">{b.note}</div></div>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="tableWrap">
@@ -492,7 +543,7 @@ function StockPageSandbox() {
 
         return (
           <Dialog open={!!editingBatchId} onOpenChange={(open) => !open && setEditingBatchId(null)}>
-            <DialogContent className="tracker-root" style={{ maxWidth: 500, background: 'var(--bg)', border: `1px solid ${editFullyDepleted ? 'color-mix(in srgb, var(--bad) 30%, var(--line))' : 'color-mix(in srgb, var(--good) 25%, var(--line))'}`, borderRadius: 12, padding: 24, gap: 0 }}>
+            <DialogContent className="tracker-root w-[calc(100vw-1rem)] sm:max-w-[500px]" style={{ background: 'var(--bg)', border: `1px solid ${editFullyDepleted ? 'color-mix(in srgb, var(--bad) 30%, var(--line))' : 'color-mix(in srgb, var(--good) 25%, var(--line))'}`, borderRadius: 12, padding: 24, gap: 0 }}>
               <DialogHeader style={{ marginBottom: 14 }}>
                 <DialogTitle style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('editBatchInPlace')}</DialogTitle>
               </DialogHeader>
@@ -585,9 +636,9 @@ function StockPageSandbox() {
                 </div>
               )}
 
-              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <DialogFooter style={{ gap: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn secondary" style={{ minWidth: 72 }} onClick={() => setEditingBatchId(null)}>{t('cancel')}</button>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', justifyContent: 'flex-end' }}>
                   <button
                     onClick={deleteBatch}
                     style={{ padding: '8px 14px', borderRadius: 6, background: 'color-mix(in srgb, var(--bad) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--bad) 30%, transparent)', color: 'var(--bad)', fontWeight: 600, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
