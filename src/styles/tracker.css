@@ -263,6 +263,15 @@
 .tracker-root .mobileTabBar::-webkit-scrollbar { display: none; }
 .tracker-root .mobileTabBar > button { flex: 0 0 auto; }
 .tracker-root .tradeDetail { background: var(--panel2); border-radius: var(--lt-radius-sm); padding: 10px; margin: 4px; border: 1px solid var(--line2); }
+.tracker-root .mobileCardList { display: flex; flex-direction: column; gap: 8px; }
+.tracker-root .mobileDataCard { background: var(--card-bg); border: 1px solid var(--line); border-radius: var(--lt-radius); padding: 10px; box-shadow: var(--lt-shadow2); }
+.tracker-root .mobileDataHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.tracker-root .mobileDataTitle { font-size: calc(12px * var(--ui-scale,1)); font-weight: 800; }
+.tracker-root .mobileDataMeta { font-size: calc(9px * var(--ui-scale,1)); color: var(--muted); display: flex; gap: 4px; flex-wrap: wrap; }
+.tracker-root .mobileDataGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tracker-root .mobileDataItem { min-width: 0; }
+.tracker-root .mobileDataLabel { font-size: calc(8px * var(--ui-scale,1)); font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.tracker-root .mobileDataValue { font-size: calc(11px * var(--ui-scale,1)); font-weight: 700; overflow-wrap: anywhere; }
 .tracker-root .prog.neg > span { background: linear-gradient(90deg, var(--bad), var(--warn)); }
 
 /* ── TOPBAR ── */
@@ -455,6 +464,7 @@
   .tracker-root .modeToggle { flex-wrap: wrap; }
   .tracker-root .modeToggle button { min-width: 0; }
   .tracker-root .tradeBuyerChip { max-width: 110px; }
+  .tracker-root .mobileDataGrid { grid-template-columns: 1fr; }
   .tracker-root .cal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tracker-root .cal-grid { gap: 2px; }
   .tracker-root .cal-day { min-height: 52px; }
