@@ -36,9 +36,10 @@ export default function RelationshipsPage() {
   }, []);
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('relationships')} description={t('activeCollaborations')} />
-      <div className="p-6 space-y-3">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-4">
+        <PageHeader title={t('relationships')} description={t('activeCollaborations')} />
+        <div className="space-y-3">
         {loading && <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
         {!loading && rels.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
@@ -50,7 +51,7 @@ export default function RelationshipsPage() {
         {rels.map(rel => (
           <Link key={rel.id} to={`/merchant/relationships/${rel.id}`}>
             <Card className="glass hover:border-primary/50 transition-colors cursor-pointer">
-              <CardContent className="flex items-center justify-between p-4">
+              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="font-medium">{rel.counterparty?.display_name || 'Unknown'}</p>
@@ -78,6 +79,7 @@ export default function RelationshipsPage() {
             </Card>
           </Link>
         ))}
+        </div>
       </div>
     </div>
   );

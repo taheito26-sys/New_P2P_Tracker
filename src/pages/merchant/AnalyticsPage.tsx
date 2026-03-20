@@ -41,9 +41,10 @@ export default function AnalyticsPage() {
   if (!analytics) return null;
 
   return (
-    <div dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={t('analyticsTitle')} description={t('analyticsSub')} />
-      <div className="p-6 space-y-6">
+    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+      <div className="app-page-content space-y-6">
+        <PageHeader title={t('analyticsTitle')} description={t('analyticsSub')} />
+        <div className="space-y-6">
         {/* Top KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label={t('totalDeployed')} value={`$${analytics.totalDeployed.toLocaleString()}`} icon={DollarSign} />
@@ -135,6 +136,7 @@ export default function AnalyticsPage() {
             </div>
           </CardContent>
         </Card>
+        </div>
       </div>
     </div>
   );
