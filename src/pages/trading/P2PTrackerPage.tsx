@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ApiError, p2p } from '@/lib/api';
-import { createTrackerState } from '@/lib/tracker-demo-data';
-import { getWACOP, totalStock } from '@/lib/tracker-helpers';
-import { computeDailySummaries } from '@/lib/p2p-demo-data';
+import { computeDailySummaries } from '@/lib/p2p-history';
 import { calculateProfitIfSoldNow } from '@/lib/p2p-profit';
+import { getRealP2PPortfolioView } from '@/lib/p2p-portfolio';
 import { useT } from '@/lib/i18n';
 import { toast } from 'sonner';
 import type { P2PSnapshot, P2PHistoryPoint, P2POffer } from '@/types/domain';
@@ -31,13 +30,7 @@ export default function P2PTrackerPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyRange, setHistoryRange] = useState<'7d' | '15d'>('7d');
 
-  const trackerPortfolio = useMemo(() => {
-    const { derived } = createTrackerState({ currency: 'QAR' });
-    return {
-      holdingsQty: totalStock(derived),
-      avgCostPerUsdtInQar: getWACOP(derived),
-    };
-  }, []);
+  const trackerPortfolio = useMemo(() => getRealP2PPortfolioView(), []);
 
   // Position Advisor state
   const [targetMargin] = useState(2); // 2%
@@ -65,10 +58,28 @@ export default function P2PTrackerPage() {
       const msg = err instanceof ApiError && err.status === 503
         ? 'Live P2P market data is unavailable.'
         : err instanceof Error ? err.message : 'Failed to load P2P data';
-      setSnapshot(null);
+      setSnapshot({
+        ts: Date.now(),
+        market,
+        source: 'unavailable',
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+        status: 'unavailable',
+        unavailableReason: msg,
+        sellAvg: null,
+        buyAvg: null,
+        bestSell: null,
+        bestBuy: null,
+        sellDepth: 0,
+        buyDepth: 0,
+        spread: null,
+        spreadPct: null,
+        sellOffers: [],
+        buyOffers: [],
+      });
       setHistory([]);
       setLastUpdate(null);
-      setError(msg);
+      setError(null);
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -117,40 +128,44 @@ export default function P2PTrackerPage() {
   }, [dailySummaries, historyRange]);
 
   const holdingsQty = trackerPortfolio.holdingsQty;
-  const avgCostPerUsdtInQar = trackerPortfolio.avgCostPerUsdtInQar;
+  const avgCostPerUsdtInQar = trackerPortfolio.avgCost;
   const targetPrice = useMemo(
     () => avgCostPerUsdtInQar != null ? avgCostPerUsdtInQar * (1 + targetMargin / 100) : null,
     [avgCostPerUsdtInQar, targetMargin],
   );
-  const sellAvg = snapshot?.sellAvg ?? 0;
-  const buyAvg = snapshot?.buyAvg ?? 0;
-  const isBelowTarget = targetPrice != null ? sellAvg < targetPrice : false;
-  const gap = targetPrice != null ? targetPrice - sellAvg : null;
-  const isGoodRestock = avgCostPerUsdtInQar != null ? buyAvg < avgCostPerUsdtInQar : false;
+  const sellAvg = snapshot?.sellAvg ?? null;
+  const buyAvg = snapshot?.buyAvg ?? null;
+  const marketComparableToPortfolio = trackerPortfolio.avgCostCurrency === currentMarket.currency;
+  const isBelowTarget = targetPrice != null && sellAvg != null ? sellAvg < targetPrice : false;
+  const gap = targetPrice != null && sellAvg != null ? targetPrice - sellAvg : null;
+  const isGoodRestock = avgCostPerUsdtInQar != null && buyAvg != null ? buyAvg < avgCostPerUsdtInQar : false;
 
   const userCash = 25000;
 
   const profitModel = useMemo(() => calculateProfitIfSoldNow({
     holdingsQty,
     avgCostPerUsdtInBase: avgCostPerUsdtInQar,
-    marketSellAvgPerUsdt: snapshot?.sellAvg ?? null,
+    marketSellAvgPerUsdt: sellAvg,
     marketCurrency: currentMarket.currency,
-    baseCurrency: 'QAR',
-  }), [currentMarket.currency, holdingsQty, avgCostPerUsdtInQar, snapshot?.sellAvg]);
+    baseCurrency: trackerPortfolio.avgCostCurrency,
+  }), [currentMarket.currency, holdingsQty, avgCostPerUsdtInQar, sellAvg, trackerPortfolio.avgCostCurrency]);
 
   const calcResult = useMemo(() => {
     const amt = parseFloat(calcAmount) || 0;
-    const rate = parseFloat(calcRate) || (calcMode === 'sell' ? sellAvg : buyAvg);
+    const fallbackRate = calcMode === 'sell' ? sellAvg : calcMode === 'buy' ? buyAvg : targetPrice;
+    const rate = parseFloat(calcRate) || fallbackRate || 0;
     if (!amt || !rate) return null;
     if (calcMode === 'sell') return { qar: amt * rate, usdt: amt, rate };
     if (calcMode === 'buy') return { qar: amt * rate, usdt: amt, rate };
     return { qar: amt * rate, usdt: amt, rate };
-  }, [calcAmount, calcRate, calcMode, sellAvg, buyAvg]);
+  }, [calcAmount, calcRate, calcMode, sellAvg, buyAvg, targetPrice]);
 
   useEffect(() => {
     if (snapshot) {
-      if (calcMode === 'sell' && !calcRate) setCalcRate(snapshot.sellAvg?.toFixed(2) || '');
-      if (calcMode === 'buy' && !calcRate) setCalcRate(snapshot.buyAvg?.toFixed(2) || '');
+      if (snapshot.source === 'live') {
+        if (calcMode === 'sell' && !calcRate) setCalcRate(snapshot.sellAvg?.toFixed(2) || '');
+        if (calcMode === 'buy' && !calcRate) setCalcRate(snapshot.buyAvg?.toFixed(2) || '');
+      }
     }
   }, [snapshot, calcMode, calcRate]);
 
@@ -188,7 +203,7 @@ export default function P2PTrackerPage() {
         <div className="empty">
           <div className="empty-t">{error}</div>
           <div className="muted" style={{ fontSize: 12 }}>
-            No synthetic fallback is used in this environment.
+            Live provider data is required for this view.
           </div>
         </div>
       </div>
@@ -198,6 +213,11 @@ export default function P2PTrackerPage() {
   if (!snapshot) return null;
 
   const ccy = currentMarket.currency;
+  const hasLiveSnapshot = snapshot.source === 'live';
+  const hasLiveHistory = history.some((point) => point.source === 'live' || point.source == null);
+  const historyUnavailable = !hasLiveHistory || history.length === 0;
+  const sellOffers = hasLiveSnapshot ? (snapshot.sellOffers || []) : [];
+  const buyOffers = hasLiveSnapshot ? (snapshot.buyOffers || []) : [];
 
   return (
     <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
@@ -225,9 +245,9 @@ export default function P2PTrackerPage() {
           </span>
         )}
         <span className="pill good" style={{ cursor: 'pointer' }} onClick={() => setAutoRefresh(!autoRefresh)}>
-          ● {autoRefresh ? (t.lang === 'ar' ? 'الاستطلاع نشط' : 'Backend polling active') : (t.lang === 'ar' ? 'استطلاع الخلفية' : 'Backend polling')}
+          ● {autoRefresh ? (t.lang === 'ar' ? 'استطلاع الخلفية نشط' : 'Backend polling active') : (t.lang === 'ar' ? 'استطلاع الخلفية' : 'Backend polling')}
         </span>
-        {snapshot.spread != null && snapshot.spreadPct != null && (
+        {snapshot.spread != null && snapshot.spreadPct != null && hasLiveSnapshot && (
           <span className="pill warn">
             {t.lang === 'ar' ? 'الفارق' : 'Spread'} {snapshot.spread.toFixed(3)} ({snapshot.spreadPct.toFixed(2)}%)
           </span>
@@ -236,15 +256,18 @@ export default function P2PTrackerPage() {
           <span className="pill bad">⚠ {t.lang === 'ar' ? 'أقل من الهدف' : 'Below target'}</span>
         )}
         <span className="pill" data-testid="pair-badge" style={{ fontWeight: 700 }}>{currentMarket.pair}</span>
-        <span className={`pill ${snapshot.stale ? 'warn' : snapshot.source === 'live' ? 'good' : 'warn'}`} data-testid="status-badge">
+        <span className={`pill ${snapshot.stale ? 'warn' : snapshot.source === 'live' ? 'good' : 'bad'}`} data-testid="status-badge">
           {snapshot.stale
             ? (t.lang === 'ar' ? 'بيانات مخبأة قديمة' : 'Stale cached data')
             : snapshot.source === 'live'
               ? (t.lang === 'ar' ? 'المزوّد المباشر متصل' : 'Live provider connected')
-              : (t.lang === 'ar' ? 'بيانات تجريبية صناعية' : 'Synthetic sandbox data')}
+              : (t.lang === 'ar' ? 'بيانات السوق المباشرة غير متاحة' : 'Live data unavailable')}
         </span>
         {snapshot.status === 'degraded' && !snapshot.stale && (
           <span className="pill warn">{t.lang === 'ar' ? 'خدمة متدهورة' : 'Degraded service'}</span>
+        )}
+        {snapshot.status === 'unavailable' && (
+          <span className="pill bad">{snapshot.unavailableReason || (t.lang === 'ar' ? 'غير متاح' : 'Unavailable')}</span>
         )}
         {marketMismatch && (
           <span className="pill bad" role="alert">{marketMismatch}</span>
@@ -262,14 +285,14 @@ export default function P2PTrackerPage() {
           <div className="kpi-lbl">{t.lang === 'ar' ? 'متوسط البيع (أعلى 5)' : 'SELL AVG (TOP 5)'}</div>
           <div className="kpi-val" style={{ color: 'var(--good)' }}>{snapshot.sellAvg?.toFixed(2) || '—'}</div>
           <div className="kpi-sub" style={{ color: 'var(--good)' }}>
-            {snapshot.sellAvg && avgCostPerUsdtInQar ? `+${((snapshot.sellAvg / avgCostPerUsdtInQar - 1) * 100).toFixed(2)}% ${t.lang === 'ar' ? 'مقابل أساس التكلفة QAR' : 'vs QAR cost basis'}` : ''}
+            {snapshot.sellAvg && avgCostPerUsdtInQar && marketComparableToPortfolio ? `+${((snapshot.sellAvg / avgCostPerUsdtInQar - 1) * 100).toFixed(2)}% ${t.lang === 'ar' ? 'مقابل أساس التكلفة QAR' : 'vs QAR cost basis'}` : (t.lang === 'ar' ? 'يتطلب أساس تكلفة قابل للمقارنة' : 'Comparable cost basis required')}
           </div>
         </div>
         <div className="kpi-card">
           <div className="kpi-lbl">{t.lang === 'ar' ? 'أفضل شراء' : 'BEST RESTOCK'}</div>
           <div className="kpi-val" style={{ color: 'var(--bad)' }}>{snapshot.bestBuy?.toFixed(2) || '—'}</div>
           <div className="kpi-sub" style={{ color: 'var(--bad)' }}>
-            {snapshot.bestBuy && avgCostPerUsdtInQar && snapshot.bestBuy < avgCostPerUsdtInQar ? (t.lang === 'ar' ? '✓ أقل من أساس التكلفة' : '✓ Below cost basis') : ''}
+            {snapshot.bestBuy && avgCostPerUsdtInQar && marketComparableToPortfolio && snapshot.bestBuy < avgCostPerUsdtInQar ? (t.lang === 'ar' ? '✓ أقل من أساس التكلفة' : '✓ Below cost basis') : ''}
           </div>
         </div>
         <div className="kpi-card">
@@ -280,21 +303,21 @@ export default function P2PTrackerPage() {
           <div className="kpi-sub">
             {profitModel.status === 'available' && holdingsQty > 0
               ? `${holdingsQty.toLocaleString()} USDT · ${t.lang === 'ar' ? 'أساس تكلفة QAR' : 'QAR cost basis'}`
-              : currentMarket.currency === 'QAR'
+              : marketComparableToPortfolio
                 ? (t.lang === 'ar' ? 'الكمية أو أساس التكلفة غير متاح' : 'Holdings or cost basis unavailable')
-                : (t.lang === 'ar' ? 'لا يوجد تحويل موثوق من هذه السوق إلى أساس QAR' : 'No truthful normalization from this market to QAR basis')}
+                : (t.lang === 'ar' ? 'لا يوجد تطبيع حقيقي بين هذه السوق وأساس التكلفة' : 'No truthful normalization for this market')}
           </div>
         </div>
         <div className="kpi-card">
           <div className="kpi-lbl">{t.lang === 'ar' ? 'أعلى بيع اليوم' : 'TODAY HIGH SELL'}</div>
-          <div className="kpi-val">{todaySummary?.highSell.toFixed(2) || '—'}</div>
+          <div className="kpi-val">{hasLiveHistory ? (todaySummary?.highSell.toFixed(2) || '—') : '—'}</div>
           <div className="kpi-sub">
             {t.lang === 'ar' ? 'أدنى' : 'Low'} {todaySummary?.lowSell?.toFixed(3) || '—'} · {todaySummary?.polls || 0} {t.lang === 'ar' ? 'استطلاع' : 'polls'}
           </div>
         </div>
         <div className="kpi-card">
           <div className="kpi-lbl">{t.lang === 'ar' ? 'أدنى شراء اليوم' : 'TODAY LOW BUY'}</div>
-          <div className="kpi-val" style={{ color: 'var(--bad)' }}>{todaySummary?.lowBuy?.toFixed(2) || '—'}</div>
+          <div className="kpi-val" style={{ color: 'var(--bad)' }}>{hasLiveHistory ? (todaySummary?.lowBuy?.toFixed(2) || '—') : '—'}</div>
           <div className="kpi-sub">{t.lang === 'ar' ? 'أعلى' : 'High'} {todaySummary?.highBuy?.toFixed(2) || '—'}</div>
         </div>
       </div>
@@ -308,6 +331,13 @@ export default function P2PTrackerPage() {
             <span className="pill">{last24hHistory.length} {t.lang === 'ar' ? 'نقطة' : 'pts'} · 24h</span>
           </div>
           <div className="panel-body">
+            {historyUnavailable && (
+              <div className="empty" style={{ padding: '24px 0' }}>
+                <div className="empty-t">{t.lang === 'ar' ? 'سجل الأسعار غير متاح' : 'Price history unavailable'}</div>
+              </div>
+            )}
+            {!historyUnavailable && (
+              <>
             {/* SELL AVG bars — GREEN for sell */}
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>
@@ -357,6 +387,8 @@ export default function P2PTrackerPage() {
                 {t.lang === 'ar' ? 'شراء' : 'Buy'} {buyChange >= 0 ? '+' : ''}{buyChange.toFixed(3)}
               </span>
             </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -396,12 +428,22 @@ export default function P2PTrackerPage() {
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{t.lang === 'ar' ? 'سيرفع متوسط التكلفة' : 'Would raise avg cost'}</div>
               </div>
             )}
+            {(!marketComparableToPortfolio || avgCostPerUsdtInQar == null || sellAvg == null || buyAvg == null) && (
+              <div style={{ padding: '8px 10px', borderRadius: 'var(--lt-radius-sm)', border: '1px solid var(--line)', background: 'rgba(255,255,255,.02)' }}>
+                <div style={{ fontWeight: 800, fontSize: 12 }}>{t.lang === 'ar' ? 'بيانات المستشار غير متاحة' : 'Advisor data unavailable'}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                  {marketComparableToPortfolio
+                    ? (t.lang === 'ar' ? 'يلزم توفر أساس التكلفة وبيانات السوق المباشرة' : 'Real cost basis and live market data are required')
+                    : (t.lang === 'ar' ? 'لا يمكن مقارنة هذه السوق مباشرة بأساس التكلفة الحالي' : 'Selected market cannot be compared to the current cost basis')}
+                </div>
+              </div>
+            )}
 
             <div className="splitGrid2" style={{ gap: 8, marginTop: 4 }}>
-              <button className="btn" style={{ justifyContent: 'center' }} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); }}>
+              <button className="btn" style={{ justifyContent: 'center' }} disabled={sellAvg == null} onClick={() => { if (sellAvg != null) { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); } }}>
                 {t.lang === 'ar' ? 'تطبيق سعر البيع' : 'Apply Sell Rate'}
               </button>
-              <button className="btn secondary" style={{ justifyContent: 'center' }} onClick={() => { setCalcMode('buy'); setCalcRate(buyAvg.toFixed(2)); }}>
+              <button className="btn secondary" style={{ justifyContent: 'center' }} disabled={buyAvg == null} onClick={() => { if (buyAvg != null) { setCalcMode('buy'); setCalcRate(buyAvg.toFixed(2)); } }}>
                 {t.lang === 'ar' ? 'تطبيق سعر الشراء' : 'Apply Buy Rate'}
               </button>
             </div>
@@ -431,8 +473,8 @@ export default function P2PTrackerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshot.sellOffers?.slice(0, 10).map((o, i) => {
-                    const maxPrice = snapshot.sellOffers?.[0]?.price || 1;
+                  {sellOffers.slice(0, 10).map((o, i) => {
+                    const maxPrice = sellOffers[0]?.price || 1;
                     const depthPct = Math.min(100, (o.price / maxPrice) * 100);
                     return (
                       <tr key={i}>
@@ -456,6 +498,9 @@ export default function P2PTrackerPage() {
                       </tr>
                     );
                   })}
+                  {sellOffers.length === 0 && (
+                    <tr><td colSpan={6} style={{ padding: 16, color: 'var(--muted)' }}>{t.lang === 'ar' ? 'عروض البيع غير متاحة' : 'Sell offers unavailable'}</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -482,9 +527,9 @@ export default function P2PTrackerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshot.buyOffers?.slice(0, 10).map((o, i) => {
-                    const minPrice = snapshot.buyOffers?.[0]?.price || 1;
-                    const maxP = snapshot.buyOffers?.[snapshot.buyOffers.length - 1]?.price || 1;
+                  {buyOffers.slice(0, 10).map((o, i) => {
+                    const minPrice = buyOffers[0]?.price || 1;
+                    const maxP = buyOffers[buyOffers.length - 1]?.price || 1;
                     const range = maxP - minPrice || 0.01;
                     const depthPct = Math.min(100, ((o.price - minPrice) / range) * 100);
                     return (
@@ -509,6 +554,9 @@ export default function P2PTrackerPage() {
                       </tr>
                     );
                   })}
+                  {buyOffers.length === 0 && (
+                    <tr><td colSpan={6} style={{ padding: 16, color: 'var(--muted)' }}>{t.lang === 'ar' ? 'عروض الشراء غير متاحة' : 'Restock offers unavailable'}</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -521,12 +569,15 @@ export default function P2PTrackerPage() {
         <div className="panel-head">
           <h2>🧮 {t.lang === 'ar' ? 'الآلة الحاسبة' : 'Calculator'}</h2>
           <div className="modeToggle">
-            <button className={calcMode === 'sell' ? 'active' : ''} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); }}>{t.lang === 'ar' ? 'بيع' : 'Sell'}</button>
-            <button className={calcMode === 'buy' ? 'active' : ''} onClick={() => { setCalcMode('buy'); setCalcRate(buyAvg.toFixed(2)); }}>{t.lang === 'ar' ? 'شراء' : 'Buy'}</button>
-            <button className={calcMode === 'target' ? 'active' : ''} onClick={() => { setCalcMode('target'); setCalcRate(targetPrice.toFixed(4)); }}>{t.lang === 'ar' ? 'مستهدف' : 'Target'}</button>
+            <button className={calcMode === 'sell' ? 'active' : ''} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg != null ? sellAvg.toFixed(2) : ''); }}>{t.lang === 'ar' ? 'بيع' : 'Sell'}</button>
+            <button className={calcMode === 'buy' ? 'active' : ''} onClick={() => { setCalcMode('buy'); setCalcRate(buyAvg != null ? buyAvg.toFixed(2) : ''); }}>{t.lang === 'ar' ? 'شراء' : 'Buy'}</button>
+            <button className={calcMode === 'target' ? 'active' : ''} onClick={() => { setCalcMode('target'); setCalcRate(targetPrice != null ? targetPrice.toFixed(4) : ''); }}>{t.lang === 'ar' ? 'مستهدف' : 'Target'}</button>
           </div>
         </div>
         <div className="panel-body">
+          {!hasLiveSnapshot && (
+            <div className="msg">{t.lang === 'ar' ? 'السعر المباشر غير متاح — أدخل السعر يدوياً' : 'Live rate unavailable — enter a rate manually.'}</div>
+          )}
           <div className="g2tight" style={{ marginBottom: 8 }}>
             <div className="field2">
               <span className="lbl">{t.lang === 'ar' ? 'المبلغ (USDT)' : 'Amount (USDT)'}</span>
@@ -568,6 +619,12 @@ export default function P2PTrackerPage() {
         </div>
         {showHistory && (
           <div className="panel-body" style={{ padding: 0 }}>
+            {historyUnavailable && (
+              <div className="empty">
+                <div className="empty-t">{t.lang === 'ar' ? 'المتوسطات التاريخية غير متاحة' : 'Historical averages unavailable'}</div>
+              </div>
+            )}
+            {!historyUnavailable && (
             <div className="tableWrap">
               <table>
                 <thead>
@@ -605,6 +662,7 @@ export default function P2PTrackerPage() {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         )}
       </div>
