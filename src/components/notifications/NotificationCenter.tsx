@@ -66,7 +66,12 @@ async function waitForRelationshipWorkspace(relationshipId: string, timeoutMs = 
   return false;
 }
 
-export default function NotificationCenter() {
+type NotificationCenterProps = {
+  triggerLabel?: string;
+  className?: string;
+};
+
+export default function NotificationCenter({ triggerLabel, className }: NotificationCenterProps) {
   const navigate = useNavigate();
   const { userId } = useAuth();
   const t = useT();
@@ -376,19 +381,21 @@ export default function NotificationCenter() {
       <button
         ref={buttonRef}
         type="button"
-        aria-label={t('notifications') || 'Notifications'}
+        aria-label={triggerLabel || t('notifications') || 'Notifications'}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls="global-notification-panel"
         onClick={() => setOpen(prev => !prev)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className={[
+          'relative inline-flex min-h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          className || '',
+        ].join(' ').trim()}
       >
-        <Bell className="h-4 w-4" aria-hidden="true" />
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-medium leading-4 text-white">
-            {unreadCount}
-          </span>
-        )}
+        <Bell className="h-4 w-4 shrink-0" aria-hidden="true" />
+        {triggerLabel ? <span className="text-sm font-medium text-foreground">{triggerLabel}</span> : null}
+        <span className="inline-flex min-w-[20px] items-center justify-center rounded-full bg-secondary px-1.5 text-[11px] font-medium text-foreground">
+          {unreadCount}
+        </span>
       </button>
 
       {open && (
@@ -405,7 +412,7 @@ export default function NotificationCenter() {
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium">{t('notifications') || 'Notifications'}</p>
+              <p className="text-sm font-medium">{triggerLabel || t('notifications') || 'Notifications'}</p>
               <p className="text-xs text-muted-foreground">
                 {unreadCount > 0 ? `${unreadCount} pending` : (t('noPendingActions') || 'No pending actions')}
               </p>

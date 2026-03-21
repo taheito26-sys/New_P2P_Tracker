@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as api from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -45,6 +45,7 @@ export default function NetworkPage() {
   const navigate = useNavigate();
 
   const [query, setQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [results, setResults] = useState<MerchantSearchResult[]>([]);
   const [searched, setSearched] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -159,13 +160,12 @@ export default function NetworkPage() {
 
   useEffect(() => { reload(); }, [reload]);
   useRealtimeRefresh(reload, ['new_message', 'new_invite', 'invite_update', 'approval_update', 'deal_update']);
-
-  // Auto-redirect to workspace if only one relationship
   useEffect(() => {
-    if (!loading && rels.length === 1 && inbox.filter(i => i.status === 'pending').length === 0) {
-      navigate(`/network/relationships/${rels[0].id}`, { replace: true });
+    if (window.location.hash === '#merchant-search') {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [loading, rels, inbox, navigate]);
+  }, []);
 
   /* ─── Handlers ─── */
   const handleSearch = async (e: React.FormEvent) => {
@@ -287,17 +287,24 @@ export default function NetworkPage() {
 
 
         {/* Search / Add partner */}
-        <form onSubmit={handleSearch} className="relative order-3 w-full md:order-none md:w-auto">
-          <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-secondary px-2.5 text-[12px] text-muted-foreground md:min-w-[180px]">
-            <Search className="w-[13px] h-[13px] opacity-50 shrink-0" />
-            <input
-              placeholder="Add partner..."
-              value={query}
-              onChange={e => { setQuery(e.target.value); if (!e.target.value) { setSearched(false); setSearchOpen(false); } }}
-              className="bg-transparent border-0 outline-none w-full text-foreground placeholder:text-muted-foreground text-[12px]"
-            />
+        <div id="merchant-search" className="order-3 w-full md:order-none md:w-auto">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium text-foreground">Find merchants and invite partners</p>
+            <p className="text-[10px] text-muted-foreground">Always available from the global topbar</p>
           </div>
-        </form>
+          <form onSubmit={handleSearch} className="relative">
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-secondary px-2.5 text-[12px] text-muted-foreground md:min-w-[220px]">
+              <Search className="w-[13px] h-[13px] opacity-50 shrink-0" />
+              <input
+                ref={searchInputRef}
+                placeholder="Add partner..."
+                value={query}
+                onChange={e => { setQuery(e.target.value); if (!e.target.value) { setSearched(false); setSearchOpen(false); } }}
+                className="bg-transparent border-0 outline-none w-full text-foreground placeholder:text-muted-foreground text-[12px]"
+              />
+            </div>
+          </form>
+        </div>
       </div>
 
       {/* Search results dropdown */}
