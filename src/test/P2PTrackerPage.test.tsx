@@ -13,11 +13,12 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
-
-vi.mock('@/lib/i18n', () => ({
-  useT: () => ({ lang: 'en', isRTL: false }),
+vi.mock('@/lib/p2p-portfolio', () => ({
+  getRealP2PPortfolioView: () => ({ holdingsQty: null, avgCost: null, avgCostCurrency: 'QAR', unavailableReason: 'portfolio_missing' }),
 }));
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@/lib/i18n', () => ({ useT: () => ({ lang: 'en', isRTL: false }) }));
 
 const baseSnapshot = {
   ts: Date.now(),
@@ -26,6 +27,7 @@ const baseSnapshot = {
   fetchedAt: '2026-03-21T12:34:56.000Z',
   stale: false,
   status: 'ok',
+  unavailableReason: null,
   sellAvg: 3.8,
   buyAvg: 3.7,
   bestSell: 3.81,
@@ -38,7 +40,7 @@ const baseSnapshot = {
   buyOffers: [],
 };
 
-const history = [{ ts: Date.now(), market: 'qatar', sellAvg: 3.8, buyAvg: 3.7, spread: 0.1, spreadPct: 2.7 }];
+const history = [{ ts: Date.now(), market: 'qatar', source: 'live', sellAvg: 3.8, buyAvg: 3.7, spread: 0.1, spreadPct: 2.7 }];
 
 describe('P2PTrackerPage', () => {
   beforeEach(() => {
@@ -57,12 +59,15 @@ describe('P2PTrackerPage', () => {
     expect(historyMock).toHaveBeenLastCalledWith('uae');
   });
 
-  it('status badge reflects backend source and stale state, and last update uses fetchedAt', async () => {
-    latestMock.mockResolvedValueOnce({ ...baseSnapshot, source: 'synthetic' });
+  it('status badge reflects truthful unavailable state and last update uses fetchedAt', async () => {
+    latestMock.mockResolvedValueOnce({ ...baseSnapshot, source: 'unavailable', status: 'unavailable', unavailableReason: 'live_provider_unconfigured', sellAvg: null, buyAvg: null, bestSell: null, bestBuy: null, spread: null, spreadPct: null });
+    historyMock.mockResolvedValueOnce([]);
     render(<P2PTrackerPage />);
 
-    expect(await screen.findByTestId('status-badge')).toHaveTextContent('Synthetic sandbox data');
+    expect(await screen.findByTestId('status-badge')).toHaveTextContent('Live data unavailable');
     expect(screen.getByText(/updated/i)).toHaveTextContent('12:34:56');
+    expect(screen.getByText(/sell offers unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/price history unavailable/i)).toBeInTheDocument();
   });
 
   it('shows stale cached data state and does not claim live', async () => {

@@ -27,6 +27,10 @@ export default function DealsPage() {
   const [allDeals, setAllDeals] = useState<MerchantDeal[]>([]);
   const [relationships, setRelationships] = useState<MerchantRelationship[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadErrors, setLoadErrors] = useState<{ deals: string | null; relationships: string | null }>({
+    deals: null,
+    relationships: null,
+  });
 
   // Edit state
   const [editingDeal, setEditingDeal] = useState<MerchantDeal | null>(null);
@@ -38,19 +42,45 @@ export default function DealsPage() {
   // Delete confirm
   const [deleteDealId, setDeleteDealId] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    try {
-      const [dealsRes, relationshipsRes] = await Promise.all([
-        dealsApi.list(),
-        relationshipsApi.list(),
-      ]);
-      setAllDeals(dealsRes.deals);
-      setRelationships(relationshipsRes.relationships);
-    } catch (err: any) {
-      toast.error(t('failedLoadDeals'));
-    } finally {
-      setLoading(false);
+  const getErrorMessage = (err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) return err.message;
+    if (typeof err === 'object' && err && 'message' in err && typeof (err as { message?: unknown }).message === 'string') {
+      return (err as { message: string }).message;
     }
+    return fallback;
+  };
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const [dealsRes, relationshipsRes] = await Promise.allSettled([
+      dealsApi.list(),
+      relationshipsApi.list(),
+    ]);
+
+    const nextErrors = { deals: null as string | null, relationships: null as string | null };
+
+    if (dealsRes.status === 'fulfilled') {
+      setAllDeals(dealsRes.value.deals);
+    } else {
+      const message = getErrorMessage(dealsRes.reason, t('failedLoadDeals'));
+      console.error('[DealsPage] failed to load deals', dealsRes.reason);
+      setAllDeals([]);
+      nextErrors.deals = message;
+      toast.error(message);
+    }
+
+    if (relationshipsRes.status === 'fulfilled') {
+      setRelationships(relationshipsRes.value.relationships);
+    } else {
+      const message = getErrorMessage(relationshipsRes.reason, 'Relationships data could not be loaded');
+      console.error('[DealsPage] failed to load relationships', relationshipsRes.reason);
+      setRelationships([]);
+      nextErrors.relationships = message;
+      toast.error(message);
+    }
+
+    setLoadErrors(nextErrors);
+    setLoading(false);
   }, [t]);
 
   useEffect(() => { reload(); }, [reload]);
@@ -103,6 +133,16 @@ export default function DealsPage() {
       <div className="app-page-content space-y-4">
         <PageHeader title={t('dealsLabel')} description={t('allDealsAcross')} />
         <div>
+        {loadErrors.deals && (
+          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            Deals data could not be loaded. {loadErrors.deals}
+          </div>
+        )}
+        {loadErrors.relationships && (
+          <div className="mb-3 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">
+            Relationships data could not be loaded. Merchant labels may be unavailable.
+          </div>
+        )}
         {allDeals.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -132,7 +172,7 @@ export default function DealsPage() {
                   const { label: familyLabel, icon: familyIcon } = getAgreementFamilyLabel(deal.deal_type, t.lang);
                   const { partnerPct } = getDealShares(deal);
                   const isLegacy = !isSupportedDealType(deal.deal_type);
-                  const merchantName = relationship?.counterparty?.display_name || '—';
+                  const merchantName = relationship?.counterparty?.display_name || (loadErrors.relationships ? 'Relationship unavailable' : '—');
                   const customerName = String((deal.metadata as any)?.customer_name || '');
                   const deletable = canDeleteDeal(deal);
 

@@ -56,6 +56,21 @@ export default function NetworkPage() {
   const [loading, setLoading] = useState(true);
   const [dealFilter, setDealFilter] = useState<DealFilter>('all');
   const [bellOpen, setBellOpen] = useState(false);
+  const [loadErrors, setLoadErrors] = useState<{
+    invitesInbox: string | null;
+    invitesSent: string | null;
+    relationships: string | null;
+    approvals: string | null;
+    deals: string | null;
+    unreadMessages: string | null;
+  }>({
+    invitesInbox: null,
+    invitesSent: null,
+    relationships: null,
+    approvals: null,
+    deals: null,
+    unreadMessages: null,
+  });
 
   // Invite dialog
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
@@ -65,34 +80,111 @@ export default function NetworkPage() {
   // Unread messages per relationship (lightweight — just counts, no full message load)
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
 
-  const reload = useCallback(async () => {
-    try {
-      const [
-        { invites: inInbox }, { invites: outSent }, { relationships }, { approvals: aprIn }, { deals }
-      ] = await Promise.all([
-        api.invites.inbox(), api.invites.sent(), api.relationships.list(), api.approvals.inbox(), api.deals.list()
-      ]);
-      setInbox(inInbox);
-      setSent(outSent);
-      setRels(relationships);
-      setAprInbox(aprIn);
-      setAllDeals(deals);
-
-      // Lightweight unread check per relationship
-      const uMap: Record<string, number> = {};
-      await Promise.all(relationships.map(async (rel) => {
-        try {
-          const { messages } = await api.messages.list(rel.id);
-          uMap[rel.id] = messages.filter(m => !m.is_read && m.sender_user_id !== userId).length;
-        } catch { uMap[rel.id] = 0; }
-      }));
-      setUnreadMap(uMap);
-    } catch {
-      toast.error(t('failedLoadNetwork'));
-    } finally {
-      setLoading(false);
+  const getErrorMessage = (err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) return err.message;
+    if (typeof err === 'object' && err && 'message' in err && typeof (err as { message?: unknown }).message === 'string') {
+      return (err as { message: string }).message;
     }
-  }, [userId]);
+    return fallback;
+  };
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const results = await Promise.allSettled([
+      api.invites.inbox(),
+      api.invites.sent(),
+      api.relationships.list(),
+      api.approvals.inbox(),
+      api.deals.list(),
+    ]);
+
+    const nextErrors = {
+      invitesInbox: null as string | null,
+      invitesSent: null as string | null,
+      relationships: null as string | null,
+      approvals: null as string | null,
+      deals: null as string | null,
+      unreadMessages: null as string | null,
+    };
+
+    const [inboxRes, sentRes, relationshipsRes, approvalsRes, dealsRes] = results;
+
+    if (inboxRes.status === 'fulfilled') {
+      setInbox(inboxRes.value.invites);
+    } else {
+      const message = getErrorMessage(inboxRes.reason, 'Invites inbox could not be loaded');
+      console.error('[NetworkPage] failed to load invites inbox', inboxRes.reason);
+      setInbox([]);
+      nextErrors.invitesInbox = message;
+      toast.error(message);
+    }
+
+    if (sentRes.status === 'fulfilled') {
+      setSent(sentRes.value.invites);
+    } else {
+      const message = getErrorMessage(sentRes.reason, 'Sent invites could not be loaded');
+      console.error('[NetworkPage] failed to load invites sent', sentRes.reason);
+      setSent([]);
+      nextErrors.invitesSent = message;
+      toast.error(message);
+    }
+
+    const loadedRelationships = relationshipsRes.status === 'fulfilled' ? relationshipsRes.value.relationships : [];
+    if (relationshipsRes.status === 'fulfilled') {
+      setRels(loadedRelationships);
+    } else {
+      const message = getErrorMessage(relationshipsRes.reason, 'Relationships data could not be loaded');
+      console.error('[NetworkPage] failed to load relationships', relationshipsRes.reason);
+      setRels([]);
+      nextErrors.relationships = message;
+      toast.error(message);
+    }
+
+    if (approvalsRes.status === 'fulfilled') {
+      setAprInbox(approvalsRes.value.approvals);
+    } else {
+      const message = getErrorMessage(approvalsRes.reason, 'Approvals could not be loaded');
+      console.error('[NetworkPage] failed to load approvals', approvalsRes.reason);
+      setAprInbox([]);
+      nextErrors.approvals = message;
+      toast.error(message);
+    }
+
+    if (dealsRes.status === 'fulfilled') {
+      setAllDeals(dealsRes.value.deals);
+    } else {
+      const message = getErrorMessage(dealsRes.reason, 'Deals data could not be loaded');
+      console.error('[NetworkPage] failed to load deals', dealsRes.reason);
+      setAllDeals([]);
+      nextErrors.deals = message;
+      toast.error(message);
+    }
+
+    const uMap: Record<string, number> = {};
+    const unreadResults = await Promise.allSettled(loadedRelationships.map(async (rel) => {
+      const { messages } = await api.messages.list(rel.id);
+      return {
+        relationshipId: rel.id,
+        unread: messages.filter(m => !m.is_read && m.sender_user_id !== userId).length,
+      };
+    }));
+
+    unreadResults.forEach((result, index) => {
+      const relId = loadedRelationships[index]?.id;
+      if (!relId) return;
+      if (result.status === 'fulfilled') {
+        uMap[relId] = result.value.unread;
+      } else {
+        console.error('[NetworkPage] failed to load unread messages', { relationshipId: relId, error: result.reason });
+        uMap[relId] = 0;
+        nextErrors.unreadMessages = nextErrors.unreadMessages || 'Unread message counts could not be loaded for some relationships';
+      }
+    });
+    setUnreadMap(uMap);
+
+    setLoadErrors(nextErrors);
+    setLoading(false);
+  }, [t, userId]);
 
   useEffect(() => { reload(); }, [reload]);
   useRealtimeRefresh(reload, ['new_message', 'new_invite', 'invite_update', 'approval_update', 'deal_update']);
@@ -360,6 +452,16 @@ export default function NetworkPage() {
       )}
 
       {/* ─── KPI STRIP ─── */}
+      {(loadErrors.deals || loadErrors.relationships || loadErrors.invitesInbox || loadErrors.invitesSent || loadErrors.approvals || loadErrors.unreadMessages) && (
+        <div className="shrink-0 border-b border-border px-3 py-2 lg:px-4 space-y-2">
+          {loadErrors.deals && <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">Deals data could not be loaded. {loadErrors.deals}</div>}
+          {loadErrors.relationships && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Relationships data could not be loaded. Merchant labels and workspace links may be incomplete.</div>}
+          {loadErrors.invitesInbox && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Invites inbox could not be loaded.</div>}
+          {loadErrors.invitesSent && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Sent invites could not be loaded.</div>}
+          {loadErrors.approvals && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Approvals could not be loaded.</div>}
+          {loadErrors.unreadMessages && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">{loadErrors.unreadMessages}</div>}
+        </div>
+      )}
       <div className="shrink-0 grid grid-cols-2 gap-2 border-b border-border px-3 py-2.5 sm:grid-cols-3 lg:grid-cols-6 lg:px-4">
         <div className="px-3 py-2 rounded-lg bg-blue-500/10">
           <p className="text-[11px] text-blue-600 flex items-center gap-1"><TrendingDown className="w-3 h-3" /> Incoming</p>
@@ -432,7 +534,7 @@ export default function NetworkPage() {
               {filteredDeals.map(deal => {
                 const cfg = DEAL_TYPE_CONFIGS[deal.deal_type];
                 const rel = relMap[deal.relationship_id];
-                const cpName = rel?.counterparty?.display_name || '—';
+                const cpName = rel?.counterparty?.display_name || (loadErrors.relationships ? 'Relationship unavailable' : '—');
                 const net = deal.realized_pnl ?? 0;
                 const isIncoming = deal.created_by !== userId;
                 return (
