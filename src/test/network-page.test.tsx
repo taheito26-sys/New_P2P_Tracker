@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -52,6 +52,7 @@ import NetworkPage from '@/pages/merchant/NetworkPage';
 
 describe('NetworkPage', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mocks.invitesInbox.mockResolvedValue({ invites: [] });
     mocks.invitesSent.mockResolvedValue({ invites: [] });
     mocks.relationshipsList.mockResolvedValue({
@@ -85,5 +86,24 @@ describe('NetworkPage', () => {
     );
 
     expect(await screen.findByText(/workspace could not be displayed/i)).toBeInTheDocument();
+  });
+
+  it('stops showing the loading spinner when a relationship message summary request hangs', async () => {
+    vi.useFakeTimers();
+    mocks.messagesList.mockImplementation(() => new Promise(() => {}));
+
+    render(
+      <MemoryRouter initialEntries={['/network']}>
+        <NetworkPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/networkTitle/i)).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4500);
+    });
+
+    expect(screen.getByText(/workspace could not be displayed/i)).toBeInTheDocument();
   });
 });

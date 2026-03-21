@@ -15,6 +15,8 @@ import { toast } from 'sonner';
 import RelationshipWorkspace from '@/pages/merchant/RelationshipWorkspace';
 import type { MerchantApproval, MerchantInvite, MerchantMessage, MerchantRelationship, MerchantSearchResult } from '@/types/domain';
 
+const MESSAGE_SUMMARY_TIMEOUT_MS = 4000;
+
 type ConversationSummary = {
   relationship: MerchantRelationship;
   unreadCount: number;
@@ -88,57 +90,84 @@ export default function NetworkPage() {
   };
 
   const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> => {
+    let timeoutId: number | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+          timeoutId = window.setTimeout(() => resolve(fallbackValue), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    }
+  };
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const [invitesRes, sentInvitesRes, relationshipsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
-      api.invites.inbox(),
-      api.relationships.list(),
-      api.approvals.inbox(),
-      api.approvals.sent(),
-    ]);
+    try {
+      const [invitesRes, sentInvitesRes, relationshipsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
+        api.invites.inbox(),
+        api.invites.sent(),
+        api.relationships.list(),
+        api.approvals.inbox(),
+        api.approvals.sent(),
+      ]);
 
-    if (invitesRes.status === 'fulfilled') setInbox(ensureArray<MerchantInvite>(invitesRes.value?.invites));
-    else {
+      if (invitesRes.status === 'fulfilled') setInbox(ensureArray<MerchantInvite>(invitesRes.value?.invites));
+      else {
+        setInbox([]);
+        toast.error(getErrorMessage(invitesRes.reason, 'Invites inbox could not be loaded'));
+      }
+
+      if (sentInvitesRes.status === 'fulfilled') setSentInvites(ensureArray<MerchantInvite>(sentInvitesRes.value?.invites));
+      else setSentInvites([]);
+
+      const rels = relationshipsRes.status === 'fulfilled'
+        ? ensureArray<MerchantRelationship>(relationshipsRes.value?.relationships)
+        : [];
+      setRelationships(rels);
+      if (relationshipsRes.status === 'rejected') toast.error(getErrorMessage(relationshipsRes.reason, 'Relationships could not be loaded'));
+
+      const approvalsInbox = approvalsInboxRes.status === 'fulfilled'
+        ? ensureArray<MerchantApproval>(approvalsInboxRes.value?.approvals)
+        : [];
+      const approvalsSent = approvalsSentRes.status === 'fulfilled'
+        ? ensureArray<MerchantApproval>(approvalsSentRes.value?.approvals)
+        : [];
+
+      const nextConversationMap: Record<string, ConversationSummary> = {};
+      const messageResults = await Promise.allSettled(rels.map(async (relationship) => {
+        const response = await withTimeout(
+          api.messages.list(relationship.id),
+          MESSAGE_SUMMARY_TIMEOUT_MS,
+          { messages: [] as MerchantMessage[] },
+        );
+        return { relationshipId: relationship.id, messages: ensureArray<MerchantMessage>(response?.messages) };
+      }));
+
+      rels.forEach((relationship, index) => {
+        const messages = messageResults[index]?.status === 'fulfilled' ? messageResults[index].value.messages : [];
+        nextConversationMap[relationship.id] = {
+          relationship,
+          unreadCount: messages.filter((message) => !message.is_read && message.sender_user_id !== userId).length,
+          latestMessage: messages[messages.length - 1] || null,
+          pendingIncomingApprovals: approvalsInbox.filter((approval) => approval.relationship_id === relationship.id && approval.status === 'pending').length,
+          pendingOutgoingApprovals: approvalsSent.filter((approval) => approval.relationship_id === relationship.id && approval.status === 'pending').length,
+        };
+      });
+      setConversationMap(nextConversationMap);
+    } catch (err) {
+      console.error('[NetworkPage] reload failed', err);
+      toast.error(getErrorMessage(err, 'Network data could not be loaded'));
       setInbox([]);
-      toast.error(getErrorMessage(invitesRes.reason, 'Invites inbox could not be loaded'));
+      setSentInvites([]);
+      setRelationships([]);
+      setConversationMap({});
+    } finally {
+      setLoading(false);
     }
-
-    if (sentInvitesRes.status === 'fulfilled') setSentInvites(ensureArray<MerchantInvite>(sentInvitesRes.value?.invites));
-    else setSentInvites([]);
-
-    const rels = relationshipsRes.status === 'fulfilled'
-      ? ensureArray<MerchantRelationship>(relationshipsRes.value?.relationships)
-      : [];
-    setRelationships(rels);
-    if (relationshipsRes.status === 'rejected') toast.error(getErrorMessage(relationshipsRes.reason, 'Relationships could not be loaded'));
-
-    const approvalsInbox = approvalsInboxRes.status === 'fulfilled'
-      ? ensureArray<MerchantApproval>(approvalsInboxRes.value?.approvals)
-      : [];
-    const approvalsSent = approvalsSentRes.status === 'fulfilled'
-      ? ensureArray<MerchantApproval>(approvalsSentRes.value?.approvals)
-      : [];
-
-    const nextConversationMap: Record<string, ConversationSummary> = {};
-    const messageResults = await Promise.allSettled(rels.map(async (relationship) => {
-      const response = await api.messages.list(relationship.id);
-      return { relationshipId: relationship.id, messages: ensureArray<MerchantMessage>(response?.messages) };
-    }));
-
-    rels.forEach((relationship, index) => {
-      const messages = messageResults[index]?.status === 'fulfilled' ? messageResults[index].value.messages : [];
-      nextConversationMap[relationship.id] = {
-        relationship,
-        unreadCount: messages.filter((message) => !message.is_read && message.sender_user_id !== userId).length,
-        latestMessage: messages[messages.length - 1] || null,
-        pendingIncomingApprovals: approvalsInbox.filter((approval) => approval.relationship_id === relationship.id && approval.status === 'pending').length,
-        pendingOutgoingApprovals: approvalsSent.filter((approval) => approval.relationship_id === relationship.id && approval.status === 'pending').length,
-      };
-    });
-    setConversationMap(nextConversationMap);
-
-    setLoading(false);
   }, [userId]);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -174,7 +203,6 @@ export default function NetworkPage() {
 
   const handleSendInvite = async () => {
     if (!inviteTarget) return;
-
     try {
       await api.invites.send({
         to_merchant_id: inviteTarget.merchant_id,
