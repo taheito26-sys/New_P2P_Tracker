@@ -404,7 +404,7 @@ export default function P2PTrackerPage() {
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{t.lang === 'ar' ? 'الفجوة' : 'Gap'}: {gap.toFixed(5)} · {t.lang === 'ar' ? 'تحتاج' : 'need'} {targetPrice.toFixed(5)}</div>
               </div>
             )}
-            {!isBelowTarget && targetPrice != null && (
+            {!isBelowTarget && targetPrice != null && sellAvg != null && (
               <div style={{ padding: '8px 10px', borderRadius: 'var(--lt-radius-sm)', border: '1px solid color-mix(in srgb, var(--good) 40%, transparent)', background: 'color-mix(in srgb, var(--good) 8%, transparent)' }}>
                 <div style={{ fontWeight: 800, fontSize: 12, color: 'var(--good)' }}>✓ {t.lang === 'ar' ? 'فوق الهدف — فرصة بيع' : 'Good time to sell'}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{t.lang === 'ar' ? 'متوسط البيع' : 'Sell avg'} {sellAvg.toFixed(3)} &gt; {t.lang === 'ar' ? 'الهدف' : 'target'} {targetPrice.toFixed(5)}</div>
