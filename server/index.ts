@@ -668,15 +668,28 @@ merchant.post('/invites/:id/accept', async (c) => {
   const profile = await requireProfile(c);
   if (!profile) return c.json({ error: 'Merchant profile required' }, 403);
 
+  const inviteId = c.req.param('id');
+  console.info('[merchant.invites.accept] attempting invite acceptance', {
+    inviteId,
+    accepterMerchantId: profile.merchant_id,
+    accepterUserId: c.get('userId'),
+  });
+
   const invite = await c.env.DB.prepare(`
     SELECT id, from_merchant_id, to_merchant_id
     FROM merchant_invites
     WHERE id = ? AND to_merchant_id = ? AND status = 'pending'
-  `).bind(c.req.param('id'), profile.merchant_id).first<{ id: string; from_merchant_id: string; to_merchant_id: string }>();
-  if (!invite) return c.json({ error: 'Invite not found or already processed' }, 404);
+  `).bind(inviteId, profile.merchant_id).first<{ id: string; from_merchant_id: string; to_merchant_id: string }>();
+  if (!invite) {
+    console.warn('[merchant.invites.accept] invite missing or no longer pending', { inviteId, accepterMerchantId: profile.merchant_id });
+    return c.json({ error: 'Invite not found or already processed' }, 404);
+  }
 
   const originator = await profileByMerchantId(c, invite.from_merchant_id);
-  if (!originator) return c.json({ error: 'Inviting merchant not found' }, 404);
+  if (!originator) {
+    console.error('[merchant.invites.accept] inviting merchant profile missing', { inviteId, originatorMerchantId: invite.from_merchant_id });
+    return c.json({ error: 'Inviting merchant not found' }, 404);
+  }
 
   const relationshipId = `rel_${crypto.randomUUID()}`;
   await c.env.DB.batch([
@@ -690,6 +703,13 @@ merchant.post('/invites/:id/accept', async (c) => {
       .bind(`role_${crypto.randomUUID()}`, relationshipId, invite.to_merchant_id, profile.user_id, 'owner'),
   ]);
 
+  console.info('[merchant.invites.accept] relationship created synchronously', {
+    inviteId: invite.id,
+    relationshipId,
+    merchantA: invite.from_merchant_id,
+    merchantB: invite.to_merchant_id,
+  });
+
   await auditLog(c, {
     relationshipId,
     actorUserId: c.get('userId'),
@@ -700,7 +720,7 @@ merchant.post('/invites/:id/accept', async (c) => {
     detail: { invite_id: invite.id },
   });
 
-  return c.json({ ok: true, relationship_id: relationshipId });
+  return c.json({ ok: true, status: 'relationship_created', relationship_id: relationshipId });
 });
 
 merchant.post('/invites/:id/reject', async (c) => {
