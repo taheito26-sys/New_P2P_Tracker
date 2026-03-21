@@ -102,10 +102,6 @@ function requestOrigin(c: Context<{ Bindings: Bindings }>): string {
   return url.origin;
 }
 
-function p2pSandboxEnabled(c: Context<{ Bindings: Bindings }>): boolean {
-  return !isProductionEnv(c);
-}
-
 function allowedOrigins(c: Context<{ Bindings: Bindings }>): string[] {
   const configured = (c.env.ALLOWED_ORIGINS || '')
     .split(',')
