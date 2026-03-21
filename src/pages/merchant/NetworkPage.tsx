@@ -14,9 +14,9 @@ import { useRealtimeRefresh } from '@/hooks/use-realtime';
 import { DEAL_TYPE_CONFIGS } from '@/lib/deal-engine';
 import { normalizeDealStatus } from '@/lib/merchant-deal-status';
 import {
-  Loader2, Search, UserPlus, Check, X, RotateCcw, Mail, Users,
-  CheckSquare, MessageCircle, AlertCircle, Briefcase,
-  DollarSign, ArrowRight, ArrowUpRight, Send, Filter, Bell,
+  Loader2, Search, UserPlus, X, RotateCcw, Users,
+  MessageCircle, Briefcase,
+  DollarSign, ArrowRight, ArrowUpRight, Send, Filter,
   TrendingUp, TrendingDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -49,25 +49,18 @@ export default function NetworkPage() {
   const [searched, setSearched] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [inbox, setInbox] = useState<MerchantInvite[]>([]);
-  const [sent, setSent] = useState<MerchantInvite[]>([]);
   const [rels, setRels] = useState<MerchantRelationship[]>([]);
-  const [aprInbox, setAprInbox] = useState<MerchantApproval[]>([]);
   const [allDeals, setAllDeals] = useState<MerchantDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [dealFilter, setDealFilter] = useState<DealFilter>('all');
-  const [bellOpen, setBellOpen] = useState(false);
   const [loadErrors, setLoadErrors] = useState<{
     invitesInbox: string | null;
-    invitesSent: string | null;
     relationships: string | null;
-    approvals: string | null;
     deals: string | null;
     unreadMessages: string | null;
   }>({
     invitesInbox: null,
-    invitesSent: null,
     relationships: null,
-    approvals: null,
     deals: null,
     unreadMessages: null,
   });
@@ -92,22 +85,18 @@ export default function NetworkPage() {
     setLoading(true);
     const results = await Promise.allSettled([
       api.invites.inbox(),
-      api.invites.sent(),
       api.relationships.list(),
-      api.approvals.inbox(),
       api.deals.list(),
     ]);
 
     const nextErrors = {
       invitesInbox: null as string | null,
-      invitesSent: null as string | null,
       relationships: null as string | null,
-      approvals: null as string | null,
       deals: null as string | null,
       unreadMessages: null as string | null,
     };
 
-    const [inboxRes, sentRes, relationshipsRes, approvalsRes, dealsRes] = results;
+    const [inboxRes, relationshipsRes, dealsRes] = results;
 
     if (inboxRes.status === 'fulfilled') {
       setInbox(inboxRes.value.invites);
@@ -119,15 +108,6 @@ export default function NetworkPage() {
       toast.error(message);
     }
 
-    if (sentRes.status === 'fulfilled') {
-      setSent(sentRes.value.invites);
-    } else {
-      const message = getErrorMessage(sentRes.reason, 'Sent invites could not be loaded');
-      console.error('[NetworkPage] failed to load invites sent', sentRes.reason);
-      setSent([]);
-      nextErrors.invitesSent = message;
-      toast.error(message);
-    }
 
     const loadedRelationships = relationshipsRes.status === 'fulfilled' ? relationshipsRes.value.relationships : [];
     if (relationshipsRes.status === 'fulfilled') {
@@ -140,15 +120,6 @@ export default function NetworkPage() {
       toast.error(message);
     }
 
-    if (approvalsRes.status === 'fulfilled') {
-      setAprInbox(approvalsRes.value.approvals);
-    } else {
-      const message = getErrorMessage(approvalsRes.reason, 'Approvals could not be loaded');
-      console.error('[NetworkPage] failed to load approvals', approvalsRes.reason);
-      setAprInbox([]);
-      nextErrors.approvals = message;
-      toast.error(message);
-    }
 
     if (dealsRes.status === 'fulfilled') {
       setAllDeals(dealsRes.value.deals);
@@ -210,23 +181,36 @@ export default function NetworkPage() {
   const openInviteDialog = (m: MerchantSearchResult) => { setInviteTarget(m); setInviteForm({ purpose: '', role: 'partner', message: '' }); setInviteDialogOpen(true); };
   const handleSendInvite = async () => {
     if (!inviteTarget) return;
+
     try {
-      await api.invites.send({ to_merchant_id: inviteTarget.merchant_id, purpose: inviteForm.purpose || t('generalCollaboration'), requested_role: inviteForm.role, message: inviteForm.message });
+      const sendInvite =
+        typeof api.invites.send === 'function'
+          ? api.invites.send
+          : typeof api.invites.create === 'function'
+            ? api.invites.create
+            : null;
+
+      if (!sendInvite) {
+        throw new Error('Invite API client is out of sync. Missing invites.send/create');
+      }
+
+      await sendInvite({
+        to_merchant_id: inviteTarget.merchant_id,
+        purpose: inviteForm.purpose || t('generalCollaboration'),
+        requested_role: inviteForm.role,
+        message: inviteForm.message,
+      });
+
       toast.success(`${t('inviteSentTo')} ${inviteTarget.display_name}`);
       setInviteDialogOpen(false);
       await reload();
-    } catch (err: any) { toast.error(err.message); }
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
-  const handleAcceptInvite = async (id: string) => { try { await api.invites.accept(id); toast.success(t('inviteAccepted')); await reload(); } catch (err: any) { toast.error(err.message); } };
-  const handleRejectInvite = async (id: string) => { try { await api.invites.reject(id); toast.success(t('inviteRejected')); await reload(); } catch (err: any) { toast.error(err.message); } };
   const handleWithdraw = async (id: string) => { try { await api.invites.withdraw(id); toast.success(t('inviteWithdrawn')); await reload(); } catch (err: any) { toast.error(err.message); } };
-  const handleApproveApproval = async (id: string) => { try { await api.approvals.approve(id); toast.success(t('approved')); await reload(); } catch (err: any) { toast.error(err.message); } };
-  const handleRejectApproval = async (id: string) => { try { await api.approvals.reject(id); toast.success(t('rejected')); await reload(); } catch (err: any) { toast.error(err.message); } };
 
   /* ─── Derived ─── */
-  const pendingInvites = inbox.filter(i => i.status === 'pending');
-  const pendingApprovals = aprInbox.filter(a => a.status === 'pending');
-  const totalAlerts = pendingInvites.length + pendingApprovals.length;
   const totalUnread = Object.values(unreadMap).reduce((s, n) => s + n, 0);
   const pendingDeals = allDeals.filter(d => d.status === 'pending');
   const activeDeals = allDeals.filter(d => d.status === 'approved');
@@ -301,118 +285,6 @@ export default function NetworkPage() {
           })}
         </div>
 
-        {/* Bell — invitations + approvals */}
-        <div className="relative order-2 md:order-none">
-          <button
-            onClick={() => setBellOpen(!bellOpen)}
-            className="relative w-8 h-8 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
-          >
-            <Bell className="w-4 h-4" />
-            {totalAlerts > 0 && (
-              <div className="absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-amber-500 text-white text-[9px] font-medium flex items-center justify-center px-0.5">{totalAlerts}</div>
-            )}
-          </button>
-
-          {/* Bell dropdown */}
-          {bellOpen && (
-            <div className="absolute right-0 top-10 z-50 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
-              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-                <p className="text-xs font-medium">Pending actions</p>
-                <button onClick={() => setBellOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
-              </div>
-              <div className="max-h-80 overflow-y-auto">
-                {pendingInvites.map(inv => (
-                  <div key={inv.id} className="px-3 py-2.5 border-b border-border/50 last:border-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Mail className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-[13px] font-medium truncate">{inv.from_display_name}</p>
-                          <p className="text-[11px] text-muted-foreground">{inv.purpose} · {inv.requested_role}</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button onClick={() => { handleAcceptInvite(inv.id); setBellOpen(false); }} className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"><Check className="w-3 h-3" /></button>
-                        <button onClick={() => { handleRejectInvite(inv.id); setBellOpen(false); }} className="px-2 py-1 rounded-md text-red-500 hover:bg-red-500/10 transition-colors"><X className="w-3 h-3" /></button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {/* Group approvals by deal — show one consolidated entry per deal */}
-                {(() => {
-                  const dealGroups = new Map<string, MerchantApproval[]>();
-                  const standalone: MerchantApproval[] = [];
-                  pendingApprovals.forEach(a => {
-                    const dealId = a.target_entity_type === 'deal' && a.target_entity_id ? a.target_entity_id : null;
-                    if (dealId) {
-                      if (!dealGroups.has(dealId)) dealGroups.set(dealId, []);
-                      dealGroups.get(dealId)!.push(a);
-                    } else {
-                      standalone.push(a);
-                    }
-                  });
-                  const entries: React.ReactNode[] = [];
-                  dealGroups.forEach((group, dealId) => {
-                    const primary = group[0];
-                    const deal = allDeals.find(d => d.id === dealId);
-                    const rel = deal ? rels.find(r => r.id === deal.relationship_id) : null;
-                    const cfg = deal ? DEAL_TYPE_CONFIGS[deal.deal_type] : null;
-                    const label = deal
-                      ? `${cfg?.label || deal.deal_type} · ${rel?.counterparty?.display_name || ''}`
-                      : primary.type.replace(/_/g, ' ');
-                    const details = group.map(a => {
-                      const t = a.type.replace(/_/g, ' ');
-                      const amt = a.proposed_payload?.amount;
-                      return amt != null ? `${t} · $${Number(amt).toLocaleString()}` : t;
-                    });
-                    entries.push(
-                      <div key={`deal-${dealId}`} className="px-3 py-2.5 border-b border-border/50 last:border-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-[13px] font-medium truncate">{label}</p>
-                              {details.map((d, i) => (
-                                <p key={i} className="text-[11px] text-muted-foreground">⚠ {d}</p>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex gap-1 shrink-0">
-                            <button onClick={async () => { for (const a of group) await handleApproveApproval(a.id); setBellOpen(false); }} className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"><Check className="w-3 h-3" /></button>
-                            <button onClick={async () => { for (const a of group) await handleRejectApproval(a.id); setBellOpen(false); }} className="px-2 py-1 rounded-md text-red-500 hover:bg-red-500/10 transition-colors"><X className="w-3 h-3" /></button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  });
-                  standalone.forEach(a => {
-                    entries.push(
-                      <div key={a.id} className="px-3 py-2.5 border-b border-border/50 last:border-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <CheckSquare className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-[13px] font-medium capitalize truncate">{a.type.replace(/_/g, ' ')}</p>
-                              <p className="text-[11px] text-muted-foreground">{a.target_entity_type} · {new Date(a.submitted_at).toLocaleDateString()}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-1 shrink-0">
-                            <button onClick={() => { handleApproveApproval(a.id); setBellOpen(false); }} className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"><Check className="w-3 h-3" /></button>
-                            <button onClick={() => { handleRejectApproval(a.id); setBellOpen(false); }} className="px-2 py-1 rounded-md text-red-500 hover:bg-red-500/10 transition-colors"><X className="w-3 h-3" /></button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  });
-                  return entries;
-                })()}
-                {totalAlerts === 0 && (
-                  <div className="text-center py-6 text-sm text-muted-foreground">No pending actions</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* Search / Add partner */}
         <form onSubmit={handleSearch} className="relative order-3 w-full md:order-none md:w-auto">
@@ -452,13 +324,11 @@ export default function NetworkPage() {
       )}
 
       {/* ─── KPI STRIP ─── */}
-      {(loadErrors.deals || loadErrors.relationships || loadErrors.invitesInbox || loadErrors.invitesSent || loadErrors.approvals || loadErrors.unreadMessages) && (
+      {(loadErrors.deals || loadErrors.relationships || loadErrors.invitesInbox || loadErrors.unreadMessages) && (
         <div className="shrink-0 border-b border-border px-3 py-2 lg:px-4 space-y-2">
           {loadErrors.deals && <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">Deals data could not be loaded. {loadErrors.deals}</div>}
           {loadErrors.relationships && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Relationships data could not be loaded. Merchant labels and workspace links may be incomplete.</div>}
           {loadErrors.invitesInbox && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Invites inbox could not be loaded.</div>}
-          {loadErrors.invitesSent && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Sent invites could not be loaded.</div>}
-          {loadErrors.approvals && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">Approvals could not be loaded.</div>}
           {loadErrors.unreadMessages && <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">{loadErrors.unreadMessages}</div>}
         </div>
       )}
