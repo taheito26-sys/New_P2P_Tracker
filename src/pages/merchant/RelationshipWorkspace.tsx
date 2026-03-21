@@ -58,6 +58,29 @@ function extractDealBuyer(deal: MerchantDeal) {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
 }
 
+function extractDealMargin(deal: MerchantDeal) {
+  const raw = deal.metadata?.margin_pct ?? deal.metadata?.margin ?? deal.metadata?.spread_pct;
+  const numeric = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+  if (Number.isFinite(numeric)) return numeric;
+  if (deal.expected_return != null && deal.amount > 0) return (deal.expected_return / deal.amount) * 100;
+  return null;
+}
+
+function formatDealRatioLabel(deal: MerchantDeal) {
+  const ratio = extractDealRatio(deal);
+  if (!ratio) return 'Not set';
+  return `${ratio.partnerPct}% / ${ratio.merchantPct ?? '—'}%`;
+}
+
+function formatDealDirection(deal: MerchantDeal, userId: string) {
+  return deal.created_by === userId ? 'Outgoing' : 'Incoming';
+}
+
+function formatCurrencyValue(value: number | null | undefined, currency = '$') {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'Not set';
+  return `${currency}${value.toLocaleString()}`;
+}
+
 function formatDealDate(deal: MerchantDeal, fallbackDate?: string) {
   const raw = deal.issue_date || fallbackDate || deal.created_at;
   const value = new Date(raw);
@@ -188,7 +211,12 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
 
   useEffect(() => { void reload(); }, [reload]);
   useRealtimeRefresh(reload, ['new_message', 'approval_update', 'deal_update']);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+  useEffect(() => {
+    const node = messagesEndRef.current;
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [msgs]);
 
   const pendingIncomingApprovals = useMemo(
     () => relApprovals.filter((approval) => approval.status === 'pending' && approval.reviewer_user_id === userId),
@@ -397,11 +425,22 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
               ) : relDeals.map((deal) => {
                 const approval = approvalByDealId.get(deal.id);
                 const outgoingApproval = outgoingApprovalByDealId.get(deal.id);
-                const ratio = extractDealRatio(deal);
                 const buyer = extractDealBuyer(deal);
                 const price = extractDealPrice(deal);
-                const outstanding = calculateOutstanding(deal);
                 const merchantLabel = rel.counterparty?.display_name || rel.counterparty?.nickname || 'Merchant';
+                const margin = extractDealMargin(deal);
+                const net = deal.realized_pnl ?? deal.expected_return ?? null;
+                const detailRows = [
+                  { label: t('date'), value: formatDealDate(deal, approval?.submitted_at || outgoingApproval?.submitted_at) },
+                  { label: 'Deal type', value: DEAL_TYPE_CONFIGS[deal.deal_type]?.label || deal.deal_type },
+                  { label: 'Ratio', value: formatDealRatioLabel(deal) },
+                  { label: 'Direction', value: formatDealDirection(deal, userId) },
+                  { label: 'Merchant', value: merchantLabel },
+                  { label: 'Status', value: deal.status },
+                  { label: 'Amount', value: `${formatCurrencyValue(deal.amount)} ${deal.currency}` },
+                  { label: 'Margin', value: margin != null ? `${margin.toFixed(2)}%` : 'Not set' },
+                  { label: 'Net', value: formatCurrencyValue(net) },
+                ];
                 return (
                   <article key={deal.id} className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -410,6 +449,35 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                           <span className="text-lg">{DEAL_TYPE_CONFIGS[deal.deal_type]?.icon || '📄'}</span>
                           <h3 className="text-base font-semibold text-foreground">{deal.title || DEAL_TYPE_CONFIGS[deal.deal_type]?.label || deal.deal_type}</h3>
                           <Badge className={dealStatusStyle(deal.status)}>{deal.status}</Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Amount</p>
+                        <p className="text-lg font-semibold text-foreground">${deal.amount.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">{deal.currency}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(260px,0.9fr)]">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {detailRows.map((detail) => (
+                          <div key={`${deal.id}-${detail.label}`} className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.label}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.value}</p>
+                          </div>
+                        ))}
+                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('buyer')}</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">{buyer || 'Not set'}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('price')}</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">{price != null ? `$${price.toLocaleString()}` : 'Not set'}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(calculateOutstanding(deal))}</p>
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
                       </div>
@@ -452,40 +520,42 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
                         <p className="mt-1 text-sm font-medium text-foreground">${outstanding.toLocaleString()}</p>
                       </div>
-                      <div className="rounded-xl border border-border/70 px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">P&amp;L</p>
-                        <p className={`mt-1 text-sm font-medium ${Number(deal.realized_pnl || 0) >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                          {Number(deal.realized_pnl || 0) >= 0 ? '+' : ''}${Number(deal.realized_pnl || 0).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                      {approval ? (
-                        <>
-                          <Button size="sm" className="gap-1.5" onClick={() => handleApproveApproval(approval.id)}>
-                            <Check className="h-3.5 w-3.5" />
-                            {t('approve')}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleRejectApproval(approval.id)}>
-                            {t('reject')}
-                          </Button>
-                          <Button size="sm" variant="secondary" onClick={() => openRejectProposal(approval.id, deal)}>
-                            Reject with ratio change
-                          </Button>
-                          <span className="text-xs text-muted-foreground">Incoming pending deal · {approvalSummaryLabel(approval)}</span>
-                        </>
-                      ) : outgoingApproval ? (
-                        <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-700">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          Awaiting counterparty approval
+                      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</p>
+                        <div className="mt-3 flex flex-col gap-2">
+                          {approval ? (
+                            <>
+                              <Button size="sm" className="justify-center gap-1.5" onClick={() => handleApproveApproval(approval.id)}>
+                                <Check className="h-3.5 w-3.5" />
+                                {t('approve')}
+                              </Button>
+                              <Button size="sm" variant="outline" className="justify-center" onClick={() => handleRejectApproval(approval.id)}>
+                                {t('reject')}
+                              </Button>
+                              <Button size="sm" variant="secondary" className="justify-center" onClick={() => openRejectProposal(approval.id, deal)}>
+                                Reject, modify, and send back
+                              </Button>
+                              <p className="text-xs text-muted-foreground">Incoming pending deal · {approvalSummaryLabel(approval)}</p>
+                            </>
+                          ) : outgoingApproval ? (
+                            <div className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-700">
+                              <Clock3 className="h-3.5 w-3.5" />
+                              Awaiting counterparty approval
+                            </div>
+                          ) : deal.status === 'approved' ? (
+                            <>
+                              <Button size="sm" variant="outline" className="justify-center gap-1.5" onClick={() => openSettlement(deal.id)}>
+                                <DollarSign className="h-3.5 w-3.5" />
+                                {t('settle')}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">Approved deals can be settled from this workspace.</p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No actions are currently available for this deal.</p>
+                          )}
                         </div>
-                      ) : deal.status === 'approved' ? (
-                        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openSettlement(deal.id)}>
-                          <DollarSign className="h-3.5 w-3.5" />
-                          {t('settle')}
-                        </Button>
-                      ) : null}
+                      </div>
                     </div>
                   </article>
                 );
@@ -646,6 +716,14 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                   <Label>Revised amount</Label>
                   <Input type="number" min="0" value={rejectForm.proposed_amount} onChange={(event) => setRejectForm((current) => ({ ...current, proposed_amount: event.target.value }))} />
                 </div>
+                <div className="space-y-2">
+                  <Label>Revised amount</Label>
+                  <Input type="number" min="0" value={rejectForm.proposed_amount} onChange={(event) => setRejectForm((current) => ({ ...current, proposed_amount: event.target.value }))} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Reason</Label>
+                <Textarea rows={4} value={rejectForm.note} onChange={(event) => setRejectForm((current) => ({ ...current, note: event.target.value }))} placeholder="Explain what should change before approval." />
               </div>
               <div className="space-y-2">
                 <Label>Reason</Label>

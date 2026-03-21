@@ -63,4 +63,76 @@ describe('RelationshipWorkspace', () => {
     expect(await screen.findByText('This relationship could not be opened.', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.queryByText(/not available yet/i)).not.toBeInTheDocument();
   }, 7000);
+
+  it('shows deal detail fields and incoming approval actions in the workspace', async () => {
+    mocks.relationshipsGet.mockResolvedValue({
+      relationship: {
+        id: 'rel_1',
+        merchant_a_id: 'merchant_a',
+        merchant_b_id: 'merchant_b',
+        invite_id: null,
+        relationship_type: 'general',
+        status: 'active',
+        shared_fields: [],
+        approval_policy: {},
+        created_at: '2026-03-21T00:00:00.000Z',
+        updated_at: '2026-03-21T00:00:00.000Z',
+        counterparty: { merchant_id: 'merchant_b', display_name: 'Taho', nickname: 'Taho' },
+        my_role: 'owner',
+        summary: { totalDeals: 1, activeExposure: 1820, realizedProfit: 0, pendingApprovals: 1 },
+      },
+    });
+    mocks.messagesList.mockResolvedValue({ messages: [] });
+    mocks.dealsList.mockResolvedValue({
+      deals: [{
+        id: 'deal_1',
+        relationship_id: 'rel_1',
+        deal_type: 'partnership',
+        title: 'Profit Share',
+        amount: 1820,
+        currency: 'USD',
+        status: 'pending',
+        metadata: { partner_ratio: 50, merchant_ratio: 50, margin_pct: 12.5 },
+        issue_date: '2026-03-21T00:00:00.000Z',
+        due_date: null,
+        close_date: null,
+        expected_return: 225,
+        realized_pnl: null,
+        created_by: 'user_2',
+        created_at: '2026-03-21T00:00:00.000Z',
+        updated_at: '2026-03-21T00:00:00.000Z',
+      }],
+    });
+    mocks.approvalsInbox.mockResolvedValue({
+      approvals: [{
+        id: 'approval_1',
+        relationship_id: 'rel_1',
+        target_entity_type: 'deal',
+        target_entity_id: 'deal_1',
+        type: 'deal_create',
+        status: 'pending',
+        proposed_payload: {},
+        submitted_by_user_id: 'user_2',
+        submitted_by_merchant_id: 'merchant_b',
+        reviewer_user_id: 'user_1',
+        resolution_note: null,
+        submitted_at: '2026-03-21T00:00:00.000Z',
+        resolved_at: null,
+        created_at: '2026-03-21T00:00:00.000Z',
+        updated_at: '2026-03-21T00:00:00.000Z',
+      }],
+    });
+    mocks.approvalsSent.mockResolvedValue({ approvals: [] });
+    mocks.markRead.mockResolvedValue(undefined);
+
+    render(<RelationshipWorkspace relationshipId="rel_1" embedded />);
+
+    expect(await screen.findByText('Deal type')).toBeInTheDocument();
+    expect(screen.getByText('Ratio')).toBeInTheDocument();
+    expect(screen.getByText('50% / 50%')).toBeInTheDocument();
+    expect(screen.getByText('Actions')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'reject' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reject, modify, and send back/i })).toBeInTheDocument();
+  });
 });

@@ -466,7 +466,7 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
   void userId;
 
   return (
-    <div className="relative shrink-0" dir={isRTL ? 'rtl' : 'ltr'}>
+    <div className="relative z-[70] shrink-0" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="sr-only" role="status" aria-live="polite">
         {announce}
       </div>
@@ -498,7 +498,7 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
           role="dialog"
           aria-label={triggerLabel || 'Activity'}
           className={[
-            'absolute z-50 mt-2 w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-xl border border-border bg-popover shadow-xl',
+            'absolute top-full z-[80] mt-2 w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-xl border border-border bg-popover shadow-xl',
             isRTL ? 'left-0' : 'right-0',
             'max-md:fixed max-md:left-2 max-md:right-2 max-md:top-14 max-md:w-auto',
           ].join(' ')}
