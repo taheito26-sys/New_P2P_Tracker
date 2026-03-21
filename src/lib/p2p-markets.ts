@@ -1,8 +1,8 @@
 export const P2P_MARKETS = ['qatar', 'uae', 'egypt'] as const;
 
 export type P2PMarket = (typeof P2P_MARKETS)[number];
-export type P2PSource = 'synthetic' | 'live';
-export type P2PStatus = 'ok' | 'degraded';
+export type P2PSource = 'live' | 'unavailable';
+export type P2PStatus = 'ok' | 'degraded' | 'unavailable';
 
 const P2P_MARKET_ALIASES: Record<string, P2PMarket> = {
   qatar: 'qatar',
