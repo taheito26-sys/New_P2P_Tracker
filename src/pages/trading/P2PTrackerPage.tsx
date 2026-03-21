@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ApiError, p2p } from '@/lib/api';
-import { computeDailySummaries, generateP2PHistory } from '@/lib/p2p-demo-data';
-import { isSandboxDataEnabled } from '@/lib/runtime-mode';
+import { computeDailySummaries } from '@/lib/p2p-demo-data';
 import { useT } from '@/lib/i18n';
 import { toast } from 'sonner';
 import type { P2PSnapshot, P2PHistoryPoint, P2POffer } from '@/types/domain';
@@ -25,7 +24,7 @@ export default function P2PTrackerPage() {
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sandboxMode = isSandboxDataEnabled();
+  const [marketMismatch, setMarketMismatch] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyRange, setHistoryRange] = useState<'7d' | '15d'>('7d');
 
@@ -43,31 +42,28 @@ export default function P2PTrackerPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setMarketMismatch(null);
     try {
-      if (sandboxMode) {
-        const demo = generateP2PHistory(market);
-        setSnapshot(demo.snapshot);
-        setHistory(demo.history);
-        setLastUpdate(new Date().toISOString());
-        return;
-      }
-
       const [s, h] = await Promise.all([p2p.latest(market), p2p.history(market)]);
       setSnapshot(s);
       setHistory(Array.isArray(h) ? h : []);
-      setLastUpdate(new Date().toISOString());
+      setLastUpdate(s.fetchedAt || null);
+      if (s.market !== market) {
+        setMarketMismatch(`Selected ${market.toUpperCase()} but backend returned ${s.market.toUpperCase()}.`);
+      }
     } catch (err: unknown) {
       const msg = err instanceof ApiError && err.status === 503
-        ? 'Live P2P market data is not configured for this environment.'
+        ? 'Live P2P market data is unavailable.'
         : err instanceof Error ? err.message : 'Failed to load P2P data';
       setSnapshot(null);
       setHistory([]);
+      setLastUpdate(null);
       setError(msg);
       toast.error(msg);
     } finally {
       setLoading(false);
     }
-  }, [market, sandboxMode]);
+  }, [market]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -162,7 +158,7 @@ export default function P2PTrackerPage() {
 
   if (loading && !snapshot && !error) {
     return (
-      <div className="tracker-root" style={{ padding: 10 }}>
+      <div className="tracker-root app-page-shell">
         <div className="empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <div className="empty-t">{t.lang === 'ar' ? 'جاري تحميل بيانات P2P…' : 'Loading P2P data…'}</div>
@@ -173,11 +169,11 @@ export default function P2PTrackerPage() {
 
   if (error && !snapshot) {
     return (
-      <div className="tracker-root" style={{ padding: 10 }}>
+      <div className="tracker-root app-page-shell">
         <div className="empty">
           <div className="empty-t">{error}</div>
           <div className="muted" style={{ fontSize: 12 }}>
-            {sandboxMode ? 'Sandbox mode is enabled.' : 'No synthetic fallback is used in this environment.'}
+            No synthetic fallback is used in this environment.
           </div>
         </div>
       </div>
@@ -189,7 +185,7 @@ export default function P2PTrackerPage() {
   const ccy = currentMarket.currency;
 
   return (
-    <div className="tracker-root" dir={t.isRTL ? 'rtl' : 'ltr'} style={{ padding: 10 }}>
+    <div className="tracker-root app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
       {/* ── Status Bar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         {/* Market selector */}
@@ -208,16 +204,13 @@ export default function P2PTrackerPage() {
         <button className="btn" onClick={load} disabled={loading} style={{ gap: 6 }}>
           <span>🔄</span> {t.lang === 'ar' ? 'تحديث' : 'Refresh'}
         </button>
-        {sandboxMode && (
-          <span className="pill warn">Sandbox synthetic data</span>
-        )}
         {lastUpdate && (
           <span className="muted" style={{ fontSize: 11 }}>
             {t.lang === 'ar' ? 'آخر تحديث' : 'Updated'} {new Date(lastUpdate).toLocaleTimeString()}
           </span>
         )}
         <span className="pill good" style={{ cursor: 'pointer' }} onClick={() => setAutoRefresh(!autoRefresh)}>
-          ● {autoRefresh ? (t.lang === 'ar' ? 'المراقبة نشطة' : 'Backend · 24h monitoring active') : (t.lang === 'ar' ? 'مراقبة 24 ساعة' : 'Backend · 24h monitoring')}
+          ● {autoRefresh ? (t.lang === 'ar' ? 'الاستطلاع نشط' : 'Backend polling active') : (t.lang === 'ar' ? 'استطلاع الخلفية' : 'Backend polling')}
         </span>
         {snapshot.spread != null && snapshot.spreadPct != null && (
           <span className="pill warn">
@@ -227,11 +220,24 @@ export default function P2PTrackerPage() {
         {isBelowTarget && (
           <span className="pill bad">⚠ {t.lang === 'ar' ? 'أقل من الهدف' : 'Below target'}</span>
         )}
-        <span className="pill" style={{ fontWeight: 700 }}>{currentMarket.pair}</span>
+        <span className="pill" data-testid="pair-badge" style={{ fontWeight: 700 }}>{currentMarket.pair}</span>
+        <span className={`pill ${snapshot.stale ? 'warn' : snapshot.source === 'live' ? 'good' : 'warn'}`} data-testid="status-badge">
+          {snapshot.stale
+            ? (t.lang === 'ar' ? 'بيانات مخبأة قديمة' : 'Stale cached data')
+            : snapshot.source === 'live'
+              ? (t.lang === 'ar' ? 'المزوّد المباشر متصل' : 'Live provider connected')
+              : (t.lang === 'ar' ? 'بيانات تجريبية صناعية' : 'Synthetic sandbox data')}
+        </span>
+        {snapshot.status === 'degraded' && !snapshot.stale && (
+          <span className="pill warn">{t.lang === 'ar' ? 'خدمة متدهورة' : 'Degraded service'}</span>
+        )}
+        {marketMismatch && (
+          <span className="pill bad" role="alert">{marketMismatch}</span>
+        )}
       </div>
 
       {/* ── 6 KPI Cards ── */}
-      <div className="kpis" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', marginBottom: 10 }}>
+      <div className="kpis kpis-6" style={{ marginBottom: 10 }}>
         <div className="kpi-card">
           <div className="kpi-lbl">{t.lang === 'ar' ? 'أفضل بيع' : 'BEST SELL'}</div>
           <div className="kpi-val" style={{ color: 'var(--bad)' }}>{snapshot.bestSell?.toFixed(2) || '—'}</div>
@@ -273,7 +279,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── Price History + Position Advisor (2 col) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="splitGrid2" style={{ marginBottom: 10 }}>
         {/* Price History — 24h only */}
         <div className="panel">
           <div className="panel-head">
@@ -337,7 +343,7 @@ export default function P2PTrackerPage() {
         <div className="panel">
           <div className="panel-head">
             <h2>🎯 {t.lang === 'ar' ? 'مستشار المركز' : 'Position Advisor'}</h2>
-            <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }}>{t.lang === 'ar' ? 'مراقبة' : 'Monitor'}</button>
+            <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }}>{t.lang === 'ar' ? 'استطلاع' : 'Poll'}</button>
           </div>
           <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 'var(--lt-radius-sm)', border: '1px solid var(--line)' }}>
@@ -368,7 +374,7 @@ export default function P2PTrackerPage() {
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+            <div className="splitGrid2" style={{ gap: 8, marginTop: 4 }}>
               <button className="btn" style={{ justifyContent: 'center' }} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); }}>
                 {t.lang === 'ar' ? 'تطبيق سعر البيع' : 'Apply Sell Rate'}
               </button>
@@ -381,7 +387,7 @@ export default function P2PTrackerPage() {
       </div>
 
       {/* ── Sell Offers + Restock Offers (2 col) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="splitGrid2" style={{ marginBottom: 10 }}>
         {/* Sell Offers — RED color theme */}
         <div className="panel">
           <div className="panel-head">
