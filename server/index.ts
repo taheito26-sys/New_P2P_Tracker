@@ -3,6 +3,7 @@ import { assertDealStatusTransition, normalizeDealStatus } from '../src/lib/merc
 import { analyzeDealDeleteDiagnostics, type LinkedFinancialRecord } from '../src/lib/merchant-deal-delete';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
+import { getP2PHistory, getP2PSnapshotWithFallback, normalizeMarketId, scheduledRefreshAllMarkets } from './p2p-provider';
 
 type Bindings = {
   DB: D1Database;
@@ -451,138 +452,6 @@ function approvalResponse(approval: Approval) {
   return {
     ...approval,
     proposed_payload: parseJson<Record<string, unknown>>(approval.proposed_payload, {}),
-  };
-}
-
-type P2POffer = {
-  price: number;
-  min: number;
-  max: number;
-  nick: string;
-  methods: string[];
-  available: number;
-};
-
-type P2PSnapshot = {
-  ts: number;
-  sellAvg: number | null;
-  buyAvg: number | null;
-  bestSell: number | null;
-  bestBuy: number | null;
-  sellDepth: number;
-  buyDepth: number;
-  spread: number | null;
-  spreadPct: number | null;
-  sellOffers: P2POffer[];
-  buyOffers: P2POffer[];
-};
-
-type P2PHistoryPoint = {
-  ts: number;
-  sellAvg: number | null;
-  buyAvg: number | null;
-  spread: number | null;
-  spreadPct: number | null;
-};
-
-const TRACKER_LATEST_KEY = 'p2p:latest';
-const TRACKER_HISTORY_KEY = 'p2p:history';
-const TRACKER_HISTORY_LIMIT = 24 * 12 * 15;
-
-function createSeededRandom(seed: number): () => number {
-  let state = seed;
-  return () => {
-    state = (state * 1664525 + 1013904223) & 0x7fffffff;
-    return state / 0x7fffffff;
-  };
-}
-
-function generateOffers(seed: number, side: 'sell' | 'buy', basePrice: number): P2POffer[] {
-  const rng = createSeededRandom(seed);
-  const methods = ['Bank Transfer', 'QNB', 'QIB', 'Vodafone Cash', 'CB Pay', 'Cash'];
-  const names = ['DohaDesk', 'QatarFlow', 'MENA-X', 'OTC Gulf', 'Desk 72', 'Capital Link'];
-  const offers = Array.from({ length: 10 }, (_, index) => {
-    const priceOffset = rng() * 0.025;
-    const price = side === 'sell'
-      ? basePrice + priceOffset
-      : Math.max(0, basePrice - priceOffset);
-    return {
-      price: Math.round(price * 100) / 100,
-      min: Math.round((200 + rng() * 4000) / 10) * 10,
-      max: Math.round((4000 + rng() * 50000) / 100) * 100,
-      nick: `${names[index % names.length]}-${index + 1}`,
-      methods: [methods[index % methods.length], methods[(index + 2) % methods.length]],
-      available: Math.round((500 + rng() * 10000) * 100) / 100,
-    };
-  });
-
-  offers.sort((a, b) => side === 'sell' ? b.price - a.price : a.price - b.price);
-  return offers;
-}
-
-function buildTrackerSnapshot(now: number): P2PSnapshot {
-  const dayBucket = Math.floor(now / (5 * 60 * 1000));
-  const rng = createSeededRandom(dayBucket);
-  const sellBase = 3.74 + Math.sin(dayBucket / 18) * 0.05 + (rng() - 0.5) * 0.02;
-  const buyBase = sellBase - 0.06 - rng() * 0.02;
-  const sellOffers = generateOffers(dayBucket, 'sell', sellBase);
-  const buyOffers = generateOffers(dayBucket + 7, 'buy', buyBase);
-  const topSell = sellOffers.slice(0, 5);
-  const topBuy = buyOffers.slice(0, 5);
-  const sellAvg = topSell.reduce((sum, offer) => sum + offer.price, 0) / topSell.length;
-  const buyAvg = topBuy.reduce((sum, offer) => sum + offer.price, 0) / topBuy.length;
-  const spread = sellAvg - buyAvg;
-
-  return {
-    ts: now,
-    sellAvg: Math.round(sellAvg * 1000) / 1000,
-    buyAvg: Math.round(buyAvg * 1000) / 1000,
-    bestSell: sellOffers[0]?.price ?? null,
-    bestBuy: buyOffers[0]?.price ?? null,
-    sellDepth: Math.round(topSell.reduce((sum, offer) => sum + offer.available, 0)),
-    buyDepth: Math.round(topBuy.reduce((sum, offer) => sum + offer.available, 0)),
-    spread: Math.round(spread * 1000) / 1000,
-    spreadPct: buyAvg > 0 ? Math.round(((spread / buyAvg) * 100) * 1000) / 1000 : null,
-    sellOffers,
-    buyOffers,
-  };
-}
-
-async function loadTrackerHistory(kv: KVNamespace): Promise<P2PHistoryPoint[]> {
-  const history = await kv.get(TRACKER_HISTORY_KEY, 'json');
-  return Array.isArray(history) ? history as P2PHistoryPoint[] : [];
-}
-
-async function persistTrackerSnapshot(env: Bindings, snapshot: P2PSnapshot): Promise<void> {
-  const history = await loadTrackerHistory(env.P2P_KV);
-  const nextPoint: P2PHistoryPoint = {
-    ts: snapshot.ts,
-    sellAvg: snapshot.sellAvg,
-    buyAvg: snapshot.buyAvg,
-    spread: snapshot.spread,
-    spreadPct: snapshot.spreadPct,
-  };
-
-  const trimmedHistory = [...history, nextPoint].slice(-TRACKER_HISTORY_LIMIT);
-  await Promise.all([
-    env.P2P_KV.put(TRACKER_LATEST_KEY, JSON.stringify(snapshot)),
-    env.P2P_KV.put(TRACKER_HISTORY_KEY, JSON.stringify(trimmedHistory)),
-  ]);
-}
-
-async function ensureTrackerState(env: Bindings): Promise<{ snapshot: P2PSnapshot; history: P2PHistoryPoint[] }> {
-  const latest = await env.P2P_KV.get(TRACKER_LATEST_KEY, 'json') as P2PSnapshot | null;
-  const history = await loadTrackerHistory(env.P2P_KV);
-
-  if (latest && history.length > 0) {
-    return { snapshot: latest, history };
-  }
-
-  const snapshot = buildTrackerSnapshot(Date.now());
-  await persistTrackerSnapshot(env, snapshot);
-  return {
-    snapshot,
-    history: await loadTrackerHistory(env.P2P_KV),
   };
 }
 
@@ -1561,18 +1430,26 @@ app.delete('/api/trades/:id', requireAuth, async (c) => {
   return c.json({ ok: true, deleted: c.req.param('id') });
 });
 app.get('/api/latest', async (c) => {
-  if (!p2pSandboxEnabled(c)) {
-    return c.json({ error: 'Live P2P market data is not configured for this environment' }, 503);
+  try {
+    const market = normalizeMarketId(c.req.query('market'));
+    const snapshot = await getP2PSnapshotWithFallback(market, c.env);
+    return c.json(snapshot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load P2P snapshot';
+    const status = /Unsupported market/i.test(message) ? 400 : /not configured/i.test(message) ? 503 : 500;
+    return c.json({ error: message }, status);
   }
-  const { snapshot } = await ensureTrackerState(c.env);
-  return c.json(snapshot);
 });
 app.get('/api/history', async (c) => {
-  if (!p2pSandboxEnabled(c)) {
-    return c.json({ error: 'Live P2P market data is not configured for this environment' }, 503);
+  try {
+    const market = normalizeMarketId(c.req.query('market'));
+    const history = await getP2PHistory(market, c.env);
+    return c.json(history);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load P2P history';
+    const status = /Unsupported market/i.test(message) ? 400 : /not configured/i.test(message) ? 503 : 500;
+    return c.json({ error: message }, status);
   }
-  const { history } = await ensureTrackerState(c.env);
-  return c.json(history);
 });
 
 app.get('/api/analytics', requireAuth, async (c) => {
@@ -1661,14 +1538,10 @@ app.get('/api/analytics', requireAuth, async (c) => {
 
 app.onError((error, c) => c.json({ error: error.message }, 500));
 
-const worker = {
+export const worker = {
   fetch: app.fetch,
   scheduled: async (_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) => {
-    if ((env.APP_ENV || 'production').trim().toLowerCase() === 'production') {
-      return;
-    }
-    const snapshot = buildTrackerSnapshot(Date.now());
-    await persistTrackerSnapshot(env, snapshot);
+    await scheduledRefreshAllMarkets(env);
   },
 };
 
