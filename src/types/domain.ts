@@ -290,10 +290,11 @@ export interface P2POffer {
 export interface P2PSnapshot {
   ts: number;
   market: 'qatar' | 'uae' | 'egypt';
-  source: 'synthetic' | 'live';
+  source: 'live' | 'unavailable';
   fetchedAt: string;
   stale: boolean;
-  status: 'ok' | 'degraded';
+  status: 'ok' | 'degraded' | 'unavailable';
+  unavailableReason?: string | null;
   latencyMs?: number;
   retryCount?: number;
   sellAvg: number | null;
@@ -310,10 +311,10 @@ export interface P2PSnapshot {
 
 export interface P2PHistoryPoint {
   market?: 'qatar' | 'uae' | 'egypt';
-  source?: 'synthetic' | 'live';
+  source?: 'live' | 'unavailable';
   fetchedAt?: string;
   stale?: boolean;
-  status?: 'ok' | 'degraded';
+  status?: 'ok' | 'degraded' | 'unavailable';
   ts: number;
   sellAvg: number | null;
   buyAvg: number | null;
