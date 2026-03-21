@@ -251,59 +251,71 @@ export default function NetworkPage() {
     <div dir={t.isRTL ? 'rtl' : 'ltr'} className="mx-1 my-1 flex min-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-xl border border-border/50 bg-card md:h-[calc(100vh-3.5rem)]">
 
       {/* ─── TOP BAR ─── */}
-      <div className="shrink-0 flex flex-wrap items-start gap-2.5 border-b border-border bg-card px-3 py-3 sm:px-4 md:min-h-12 md:items-center md:py-2">
-        <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-          <Briefcase className="w-3.5 h-3.5 text-blue-600" />
-        </div>
-        <div className="shrink-0">
-          <h1 className="text-[13px] font-medium leading-tight">{t('networkTitle')}</h1>
-          <p className="text-[11px] text-muted-foreground leading-tight">{rels.length} partners · {allDeals.length} deals</p>
-        </div>
-        <div className="flex-1" />
-
-        {/* Merchant chips — each is a link to workspace */}
-        <div className="order-4 flex w-full flex-wrap items-center gap-1.5 md:order-none md:w-auto">
-          {rels.map(rel => {
-            const name = rel.counterparty?.display_name || 'Unknown';
-            const hasUnread = (unreadMap[rel.id] || 0) > 0;
-            return (
-              <button
-                key={rel.id}
-                onClick={() => navigate(`/network/relationships/${rel.id}`)}
-                className="flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-border hover:border-blue-500/50 hover:bg-blue-500/5 transition-all relative group"
-              >
-                <div className="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center text-[11px] font-medium text-blue-600 dark:text-blue-400 shrink-0">
-                  {name.charAt(0).toUpperCase()}
-                </div>
-                <span className="max-w-[120px] truncate text-[12px] font-medium">{name}</span>
-                <ArrowUpRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                {hasUnread && (
-                  <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-card" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-
-        {/* Search / Add partner */}
-        <div id="merchant-search" className="order-3 w-full md:order-none md:w-auto">
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <p className="text-[11px] font-medium text-foreground">Find merchants and invite partners</p>
-            <p className="text-[10px] text-muted-foreground">Always available from the global topbar</p>
+      <div className="shrink-0 border-b border-border bg-card px-3 py-3 sm:px-4 md:py-3">
+        <div className="flex flex-wrap items-start gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+            <Briefcase className="w-3.5 h-3.5 text-blue-600" />
           </div>
-          <form onSubmit={handleSearch} className="relative">
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-secondary px-2.5 text-[12px] text-muted-foreground md:min-w-[220px]">
-              <Search className="w-[13px] h-[13px] opacity-50 shrink-0" />
-              <input
-                ref={searchInputRef}
-                placeholder="Add partner..."
-                value={query}
-                onChange={e => { setQuery(e.target.value); if (!e.target.value) { setSearched(false); setSearchOpen(false); } }}
-                className="bg-transparent border-0 outline-none w-full text-foreground placeholder:text-muted-foreground text-[12px]"
-              />
+          <div className="shrink-0">
+            <h1 className="text-[13px] font-medium leading-tight">{t('networkTitle')}</h1>
+            <p className="text-[11px] text-muted-foreground leading-tight">{rels.length} partners · {allDeals.length} deals</p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(320px,1fr)_minmax(260px,360px)] md:items-start md:gap-4">
+          {/* Search / Add partner */}
+          <section id="merchant-search" aria-labelledby="merchant-search-heading" className="min-w-0">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p id="merchant-search-heading" className="text-[11px] font-medium text-foreground">Find merchants and invite partners</p>
+              <p className="text-[10px] text-muted-foreground">Always available from the global topbar</p>
             </div>
-          </form>
+            <form onSubmit={handleSearch} className="relative">
+              <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-secondary px-2.5 text-[12px] text-muted-foreground">
+                <Search className="w-[13px] h-[13px] opacity-50 shrink-0" />
+                <input
+                  ref={searchInputRef}
+                  placeholder="Add partner..."
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); if (!e.target.value) { setSearched(false); setSearchOpen(false); } }}
+                  className="bg-transparent border-0 outline-none w-full text-foreground placeholder:text-muted-foreground text-[12px]"
+                />
+              </div>
+            </form>
+          </section>
+
+          <section aria-labelledby="relationship-shortcuts-heading" className="min-w-0 rounded-xl border border-border/70 bg-secondary/30 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p id="relationship-shortcuts-heading" className="text-[11px] font-medium text-foreground">Open relationships</p>
+              <p className="text-[10px] text-muted-foreground">Manual workspace access</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Relationship shortcuts">
+              {rels.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
+                  No relationships yet. Search for a merchant to get started.
+                </div>
+              ) : rels.map(rel => {
+                const name = rel.counterparty?.display_name || 'Unknown';
+                const hasUnread = (unreadMap[rel.id] || 0) > 0;
+                return (
+                  <button
+                    key={rel.id}
+                    onClick={() => navigate(`/network/relationships/${rel.id}`)}
+                    className="flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-border hover:border-blue-500/50 hover:bg-blue-500/5 transition-all relative group"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center text-[11px] font-medium text-blue-600 dark:text-blue-400 shrink-0">
+                      {name.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="max-w-[120px] truncate text-[12px] font-medium">{name}</span>
+                    <ArrowUpRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    {hasUnread && (
+                      <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-card" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         </div>
       </div>
 
