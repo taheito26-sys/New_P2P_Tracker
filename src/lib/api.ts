@@ -207,6 +207,9 @@ export const messages = {
     request<{ ok: boolean }>(`/api/merchant/messages/mark-read/${messageId}`, { method: 'POST' }),
 };
 
+const reviewApproval = (id: string, status: 'approved' | 'rejected', resolution_note?: string) =>
+  request<{ ok: boolean; approval: MerchantApproval }>(`/api/merchant/approvals/${id}/review`, { method: 'POST', body: JSON.stringify({ status, resolution_note }) });
+
 export const approvals = {
   inbox: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/inbox'),
   sent: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/sent'),

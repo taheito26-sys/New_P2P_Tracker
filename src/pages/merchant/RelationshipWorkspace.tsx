@@ -479,6 +479,46 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
                           <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(calculateOutstanding(deal))}</p>
                         </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Amount</p>
+                        <p className="text-lg font-semibold text-foreground">${deal.amount.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">{deal.currency}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-xl bg-secondary/60 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Merchant</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{merchantLabel}</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary/60 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('date')}</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{formatDealDate(deal, approval?.submitted_at || outgoingApproval?.submitted_at)}</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary/60 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('buyer')}</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{buyer || 'Not set'}</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary/60 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('price')}</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{price != null ? `$${price.toLocaleString()}` : 'Not set'}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-xl border border-border/70 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Direction</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{deal.created_by === userId ? 'Outgoing' : 'Incoming'}</p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ratio</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{ratio ? `${ratio.partnerPct}% / ${ratio.merchantPct ?? '—'}%` : 'Not set'}</p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">${outstanding.toLocaleString()}</p>
                       </div>
 
                       <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
@@ -676,6 +716,14 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                   <Label>Revised amount</Label>
                   <Input type="number" min="0" value={rejectForm.proposed_amount} onChange={(event) => setRejectForm((current) => ({ ...current, proposed_amount: event.target.value }))} />
                 </div>
+                <div className="space-y-2">
+                  <Label>Revised amount</Label>
+                  <Input type="number" min="0" value={rejectForm.proposed_amount} onChange={(event) => setRejectForm((current) => ({ ...current, proposed_amount: event.target.value }))} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Reason</Label>
+                <Textarea rows={4} value={rejectForm.note} onChange={(event) => setRejectForm((current) => ({ ...current, note: event.target.value }))} placeholder="Explain what should change before approval." />
               </div>
               <div className="space-y-2">
                 <Label>Reason</Label>
