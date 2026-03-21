@@ -198,9 +198,9 @@ export const messages = {
   list: (relationshipId: string) =>
     request<{ messages: MerchantMessage[] }>(`/api/merchant/messages/${relationshipId}/messages`),
 
-  send: (relationshipId: string, body: string, messageType?: string) =>
+  send: (relationshipId: string, body: string, messageType?: string, metadata?: Record<string, unknown>) =>
     request<{ ok: boolean; message: MerchantMessage }>(`/api/merchant/messages/${relationshipId}/messages`, {
-      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text' }),
+      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text', metadata }),
     }),
 
   markRead: (messageId: string) =>
