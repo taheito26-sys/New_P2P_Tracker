@@ -5,7 +5,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import NotificationCenter from '@/components/notifications/NotificationCenter';
+import ActivityCenter from '@/components/notifications/ActivityCenter';
 import '@/styles/tracker.css';
 
 const RANGE_OPTIONS = [
@@ -77,7 +77,7 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
           </div>
 
           <div className="tracker-topbar-mobile-actions">
-            <NotificationCenter triggerLabel="Network" className="max-w-[11rem] justify-between" />
+            <ActivityCenter triggerLabel="Activity" className="max-w-[11rem] justify-between" />
             <button
               className={cn('tracker-icon-btn tracker-icon-btn--mobile-toggle', mobileControlsOpen && 'active')}
               type="button"
@@ -123,7 +123,7 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
             </div>
 
             <div className="space-y-2">
-              <NotificationCenter triggerLabel="Network Notifications" className="w-full justify-between" />
+              <ActivityCenter triggerLabel="Activity" className="w-full justify-between" />
               <button
                 className="inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 type="button"
@@ -190,7 +190,7 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
         </div>
 
         <div className="flex items-center gap-2">
-          <NotificationCenter triggerLabel="Network Notifications" className="justify-between" />
+          <ActivityCenter triggerLabel="Activity" className="justify-between" />
           <button
             className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             type="button"
