@@ -143,6 +143,7 @@ export interface MerchantDeal {
 
 // ─── Approvals ──────────────────────────────────────────────────────
 export type ApprovalType =
+  | 'deal_create'
   | 'settlement_submit'
   | 'profit_record_submit'
   | 'capital_adjustment'
@@ -291,10 +292,16 @@ export interface P2PSnapshot {
   ts: number;
   market: 'qatar' | 'uae' | 'egypt';
   source: 'live' | 'unavailable';
+  servedFrom?: 'live_fetch' | 'memory_cache' | 'kv' | 'stale_cache';
+  peerSource?: string;
   fetchedAt: string;
   stale: boolean;
   status: 'ok' | 'degraded' | 'unavailable';
   unavailableReason?: string | null;
+  version?: number;
+  lamport?: number;
+  cacheAgeMs?: number;
+  replicationLagMs?: number;
   latencyMs?: number;
   retryCount?: number;
   sellAvg: number | null;
