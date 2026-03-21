@@ -17,7 +17,7 @@ class MemoryKV {
 const createEnv = (overrides: Record<string, unknown> = {}) => ({
   DB: {} as D1Database,
   P2P_KV: new MemoryKV() as unknown as KVNamespace,
-  APP_ENV: 'development',
+  APP_ENV: 'production',
   ...overrides,
 });
 
@@ -35,40 +35,55 @@ describe('p2p provider market normalization', () => {
   });
 });
 
-describe('p2p provider storage and fallback isolation', () => {
-  it('stores and retrieves market-specific snapshots and histories independently', async () => {
+describe('p2p provider real-data-only behavior', () => {
+  it('returns unavailable snapshots instead of synthetic data when no live provider is configured', async () => {
     const env = createEnv();
+    const snapshot = await getP2PSnapshot('qatar', env as any);
+    const history = await getP2PHistory('qatar', env as any);
 
-    const qatar = await refreshP2PMarketSnapshot('qatar', env as any);
-    const uae = await refreshP2PMarketSnapshot('uae', env as any);
-    const egypt = await refreshP2PMarketSnapshot('egypt', env as any);
+    expect(snapshot.market).toBe('qatar');
+    expect(snapshot.source).toBe('unavailable');
+    expect(snapshot.status).toBe('unavailable');
+    expect(snapshot.sellOffers).toEqual([]);
+    expect(history).toEqual([]);
+  });
 
-    expect(qatar.snapshot.market).toBe('qatar');
-    expect(uae.snapshot.market).toBe('uae');
-    expect(egypt.snapshot.market).toBe('egypt');
+  it('stores and retrieves market-specific histories independently for live data only', async () => {
+    const env = createEnv({ P2P_LIVE_PROVIDER_URL: 'https://provider.example/p2p' });
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ts: 1, sellAvg: 3.81, buyAvg: 3.74, bestSell: 3.82, bestBuy: 3.73, sellDepth: 100, buyDepth: 80, spread: 0.08, spreadPct: 2.1, sellOffers: [], buyOffers: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ts: 2, sellAvg: 3.67, buyAvg: 3.61, bestSell: 3.68, bestBuy: 3.6, sellDepth: 90, buyDepth: 70, spread: 0.06, spreadPct: 1.7, sellOffers: [], buyOffers: [] }), { status: 200 })) as any;
+
+    await refreshP2PMarketSnapshot('qatar', env as any);
+    await refreshP2PMarketSnapshot('uae', env as any);
 
     const qatarHistory = await getP2PHistory('qatar', env as any);
     const uaeHistory = await getP2PHistory('uae', env as any);
     expect(qatarHistory.every((point) => point.market === 'qatar')).toBe(true);
     expect(uaeHistory.every((point) => point.market === 'uae')).toBe(true);
-    expect(JSON.stringify(qatarHistory)).not.toBe(JSON.stringify(uaeHistory));
   });
 
-  it('production mode does not use synthetic data', async () => {
-    const env = createEnv({ APP_ENV: 'production' });
-    await expect(getP2PSnapshot('qatar', env as any)).rejects.toThrow(/not configured/i);
+  it('rejects non-live provider payloads for the P2P tab', async () => {
+    const env = createEnv({ P2P_LIVE_PROVIDER_URL: 'https://provider.example/p2p' });
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ source: 'synthetic' }), { status: 200 })) as any;
+
+    const snapshot = await getP2PSnapshotWithFallback('qatar', env as any);
+    expect(snapshot.source).toBe('unavailable');
+    expect(snapshot.status).toBe('unavailable');
   });
 
   it('stale fallback remains within the same market only', async () => {
-    const env = createEnv({ APP_ENV: 'production', P2P_LIVE_PROVIDER_URL: 'https://provider.example/p2p' });
+    const env = createEnv({ P2P_LIVE_PROVIDER_URL: 'https://provider.example/p2p' });
     const kv = env.P2P_KV as unknown as MemoryKV;
-    await kv.put('p2p:qatar:latest', JSON.stringify({ market: 'qatar', source: 'live', fetchedAt: '2026-03-21T00:00:00.000Z', stale: false, status: 'ok', ts: 1, sellAvg: 3.8, buyAvg: 3.7, bestSell: 3.81, bestBuy: 3.69, sellDepth: 10, buyDepth: 10, spread: 0.11, spreadPct: 2, sellOffers: [], buyOffers: [] }));
+    await kv.put('p2p:qatar:latest', JSON.stringify({ market: 'qatar', source: 'live', fetchedAt: '2026-03-21T00:00:00.000Z', stale: false, status: 'ok', unavailableReason: null, ts: 1, sellAvg: 3.8, buyAvg: 3.7, bestSell: 3.81, bestBuy: 3.69, sellDepth: 10, buyDepth: 10, spread: 0.11, spreadPct: 2, sellOffers: [], buyOffers: [] }));
     global.fetch = vi.fn().mockRejectedValue(new Error('upstream failed')) as any;
 
     const snapshot = await getP2PSnapshotWithFallback('qatar', env as any);
     expect(snapshot.market).toBe('qatar');
     expect(snapshot.stale).toBe(true);
-    await expect(getP2PSnapshotWithFallback('uae', env as any)).rejects.toThrow(/upstream failed/i);
+    const uaeSnapshot = await getP2PSnapshotWithFallback('uae', env as any);
+    expect(uaeSnapshot.market).toBe('uae');
+    expect(uaeSnapshot.source).toBe('unavailable');
   });
 
   it('scheduled refresh processes all three markets independently', async () => {
@@ -83,18 +98,17 @@ describe('p2p provider storage and fallback isolation', () => {
 describe('worker market-aware routes', () => {
   it('returns market-specific latest/history results and rejects unknown markets', async () => {
     const env = createEnv();
-    await refreshP2PMarketSnapshot('qatar', env as any);
-    await refreshP2PMarketSnapshot('uae', env as any);
 
     const latestRes = await worker.fetch(new Request('https://example.com/api/latest?market=qar'), env as any, {} as ExecutionContext);
     expect(latestRes.status).toBe(200);
     const latest = await latestRes.json();
     expect(latest.market).toBe('qatar');
+    expect(latest.source).toBe('unavailable');
 
     const historyRes = await worker.fetch(new Request('https://example.com/api/history?market=uae'), env as any, {} as ExecutionContext);
     expect(historyRes.status).toBe(200);
     const history = await historyRes.json();
-    expect(history.every((point: any) => point.market === 'uae')).toBe(true);
+    expect(history).toEqual([]);
 
     const invalidRes = await worker.fetch(new Request('https://example.com/api/latest?market=invalid'), env as any, {} as ExecutionContext);
     expect(invalidRes.status).toBe(400);
