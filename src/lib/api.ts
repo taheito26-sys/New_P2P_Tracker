@@ -124,6 +124,8 @@ export const invites = {
   sent: () => request<{ invites: MerchantInvite[] }>('/api/merchant/invites/sent'),
   create: (data: Partial<MerchantInvite>) =>
     request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', { method: 'POST', body: JSON.stringify(data) }),
+  send: (data: Partial<MerchantInvite>) =>
+    request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', { method: 'POST', body: JSON.stringify(data) }),
   respond: (id: string, action: 'accept' | 'reject') =>
     request<{ ok: boolean; invite: MerchantInvite }>(`/api/merchant/invites/${id}/${action}`, { method: 'POST' }),
   withdraw: (id: string) =>
