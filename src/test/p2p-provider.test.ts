@@ -63,19 +63,20 @@ describe('p2p provider real-data-only behavior', () => {
     expect(uaeHistory.every((point) => point.market === 'uae')).toBe(true);
   });
 
-  it('rejects non-live provider payloads for the P2P tab', async () => {
+  it('accepts upstream cache/fresh sources because the provider normalizes them to live', async () => {
     const env = createEnv({ P2P_LIVE_PROVIDER_URL: 'https://provider.example/p2p' });
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ source: 'synthetic' }), { status: 200 })) as any;
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ source: 'cache', ts: 1, sellAvg: 3.81, buyAvg: 3.74, bestSell: 3.82, bestBuy: 3.73, sellDepth: 100, buyDepth: 80, spread: 0.08, spreadPct: 2.1, sellOffers: [], buyOffers: [], history: [], dayStats: null, ageMs: 1000 }), { status: 200 })) as any;
 
     const snapshot = await getP2PSnapshotWithFallback('qatar', env as any);
-    expect(snapshot.source).toBe('unavailable');
-    expect(snapshot.status).toBe('unavailable');
+    expect(snapshot.source).toBe('live');
+    expect(snapshot.status).toBe('ok');
+    expect(snapshot.sellAvg).toBe(3.81);
   });
 
   it('stale fallback remains within the same market only', async () => {
     const env = createEnv({ P2P_LIVE_PROVIDER_URL: 'https://provider.example/p2p' });
     const kv = env.P2P_KV as unknown as MemoryKV;
-    await kv.put('p2p:qatar:latest', JSON.stringify({ market: 'qatar', source: 'live', fetchedAt: '2026-03-21T00:00:00.000Z', stale: false, status: 'ok', unavailableReason: null, ts: 1, sellAvg: 3.8, buyAvg: 3.7, bestSell: 3.81, bestBuy: 3.69, sellDepth: 10, buyDepth: 10, spread: 0.11, spreadPct: 2, sellOffers: [], buyOffers: [] }));
+    await kv.put('p2p:latest', JSON.stringify({ market: 'qatar', source: 'live', fetchedAt: '2026-03-21T00:00:00.000Z', stale: false, status: 'ok', unavailableReason: null, ts: 1, sellAvg: 3.8, buyAvg: 3.7, bestSell: 3.81, bestBuy: 3.69, sellDepth: 10, buyDepth: 10, spread: 0.11, spreadPct: 2, sellOffers: [], buyOffers: [] }));
     global.fetch = vi.fn().mockRejectedValue(new Error('upstream failed')) as any;
 
     const snapshot = await getP2PSnapshotWithFallback('qatar', env as any);
@@ -112,5 +113,23 @@ describe('worker market-aware routes', () => {
 
     const invalidRes = await worker.fetch(new Request('https://example.com/api/latest?market=invalid'), env as any, {} as ExecutionContext);
     expect(invalidRes.status).toBe(400);
+  });
+});
+
+
+describe('p2p provider qatar KV compatibility', () => {
+  it('reads qatar snapshots and history from flat upstream KV keys', async () => {
+    const env = createEnv();
+    const kv = env.P2P_KV as unknown as MemoryKV;
+    await kv.put('p2p:latest', JSON.stringify({ market: 'qatar', source: 'live', fetchedAt: '2026-03-21T00:00:00.000Z', stale: false, status: 'ok', unavailableReason: null, ts: 1, sellAvg: 3.8, buyAvg: 3.7, bestSell: 3.81, bestBuy: 3.69, sellDepth: 10, buyDepth: 10, spread: 0.11, spreadPct: 2, sellOffers: [], buyOffers: [] }));
+    await kv.put('p2p:history', JSON.stringify([{ market: 'qatar', source: 'live', fetchedAt: '2026-03-21T00:00:00.000Z', stale: false, status: 'ok', ts: 1, sellAvg: 3.8, buyAvg: 3.7, spread: 0.11, spreadPct: 2 }]));
+
+    const snapshot = await getP2PSnapshot('qatar', env as any);
+    const history = await getP2PHistory('qatar', env as any);
+
+    expect(snapshot.source).toBe('live');
+    expect(snapshot.sellAvg).toBe(3.8);
+    expect(history).toHaveLength(1);
+    expect(history[0].market).toBe('qatar');
   });
 });

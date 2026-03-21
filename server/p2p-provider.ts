@@ -14,6 +14,7 @@ const LIVE_MAX_RETRIES = 2;
 const LIVE_BACKOFF_MS = 250;
 
 function kvKey(market: P2PMarket, kind: 'latest' | 'history'): string {
+  if (market === 'qatar') return `p2p:${kind}`;
   return `p2p:${market}:${kind}`;
 }
 
@@ -98,8 +99,6 @@ async function delay(ms: number) {
 
 function assertLivePayload(market: P2PMarket, payload: unknown): asserts payload is Omit<P2PSnapshot, 'market' | 'source' | 'fetchedAt' | 'stale' | 'status'> & Partial<P2PSnapshot> {
   if (!payload || typeof payload !== 'object') throw new Error(`Live provider returned invalid payload for ${market}`);
-  const data = payload as Record<string, unknown>;
-  if (data.source && data.source !== 'live') throw new Error(`Live provider returned unsupported source for ${market}`);
 }
 
 async function fetchLiveSnapshot(market: P2PMarket, env: ProviderEnv): Promise<P2PSnapshot> {
