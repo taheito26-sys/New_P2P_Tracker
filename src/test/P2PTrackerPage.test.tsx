@@ -84,4 +84,37 @@ describe('P2PTrackerPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Selected QATAR but backend returned UAE');
   });
+
+  it('shows unavailable placeholders instead of fake values when live market data is unavailable', async () => {
+    latestMock.mockResolvedValueOnce({
+      ...baseSnapshot,
+      source: 'unavailable',
+      status: 'unavailable',
+      unavailableReason: 'live_provider_unconfigured',
+      sellAvg: null,
+      buyAvg: null,
+      bestSell: null,
+      bestBuy: null,
+      spread: null,
+      spreadPct: null,
+    });
+    historyMock.mockResolvedValueOnce([]);
+    render(<P2PTrackerPage />);
+
+    expect(await screen.findByTestId('status-badge')).toHaveTextContent('Live data unavailable');
+    expect(screen.getByText('BEST SELL').closest('.kpi-card')).toHaveTextContent('—');
+    expect(screen.getByText('BEST RESTOCK').closest('.kpi-card')).toHaveTextContent('—');
+    expect(screen.queryByText(/fits your cash/i)).not.toBeInTheDocument();
+  });
+
+  it('updates the pair badge when switching markets so currency labels match the selected market', async () => {
+    render(<P2PTrackerPage />);
+    expect(await screen.findByTestId('pair-badge')).toHaveTextContent('USDT/QAR');
+
+    latestMock.mockResolvedValueOnce({ ...baseSnapshot, market: 'uae' });
+    historyMock.mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole('button', { name: 'UAE' }));
+
+    await waitFor(() => expect(screen.getByTestId('pair-badge')).toHaveTextContent('USDT/AED'));
+  });
 });
