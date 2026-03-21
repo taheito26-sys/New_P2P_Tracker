@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import type { P2PSnapshot, P2PHistoryPoint, P2POffer } from '@/types/domain';
 import '@/styles/tracker.css';
 
-type CalcMode = 'sell' | 'buy' | 'target';
 type MarketId = 'qatar' | 'uae' | 'egypt';
 
 const MARKETS: { id: MarketId; label: string; labelAr: string; currency: string; pair: string }[] = [
@@ -32,11 +31,6 @@ export default function P2PTrackerPage() {
   const [targetMargin, setTargetMargin] = useState('2');
 
   const trackerPortfolio = useMemo(() => getRealP2PPortfolioView(), []);
-
-  // Calculator
-  const [calcMode, setCalcMode] = useState<CalcMode>('sell');
-  const [calcAmount, setCalcAmount] = useState('1000');
-  const [calcRate, setCalcRate] = useState('');
 
   const currentMarket = MARKETS.find(m => m.id === market) || MARKETS[0];
 
@@ -158,25 +152,6 @@ export default function P2PTrackerPage() {
     baseCurrency: trackerPortfolio.avgCostCurrency,
   }), [currentMarket.currency, holdingsQty, avgCostPerUsdtInQar, sellAvg, trackerPortfolio.avgCostCurrency]);
 
-  const calcResult = useMemo(() => {
-    const amt = parseFloat(calcAmount) || 0;
-    const fallbackRate = calcMode === 'sell' ? sellAvg : calcMode === 'buy' ? buyAvg : targetPrice;
-    const rate = parseFloat(calcRate) || fallbackRate || 0;
-    if (!amt || !rate) return null;
-    if (calcMode === 'sell') return { qar: amt * rate, usdt: amt, rate };
-    if (calcMode === 'buy') return { qar: amt * rate, usdt: amt, rate };
-    return { qar: amt * rate, usdt: amt, rate };
-  }, [calcAmount, calcRate, calcMode, sellAvg, buyAvg, targetPrice]);
-
-  useEffect(() => {
-    if (snapshot) {
-      if (snapshot.source === 'live') {
-        if (calcMode === 'sell' && !calcRate) setCalcRate(snapshot.sellAvg?.toFixed(2) || '');
-        if (calcMode === 'buy' && !calcRate) setCalcRate(snapshot.buyAvg?.toFixed(2) || '');
-      }
-    }
-  }, [snapshot, calcMode, calcRate]);
-
   const sellChange = useMemo(() => {
     if (last24hHistory.length < 2) return null;
     const prev = last24hHistory[last24hHistory.length - 2];
@@ -229,7 +204,7 @@ export default function P2PTrackerPage() {
             <button
               key={m.id}
               className={market === m.id ? 'active' : ''}
-              onClick={() => { setMarket(m.id); setCalcRate(''); }}
+              onClick={() => { setMarket(m.id); }}
             >
               {t.isRTL ? m.labelAr : m.label}
             </button>
@@ -451,15 +426,6 @@ export default function P2PTrackerPage() {
                 </div>
               </div>
             )}
-
-            <div className="splitGrid2" style={{ gap: 8, marginTop: 4 }}>
-              <button className="btn" style={{ justifyContent: 'center' }} disabled={sellAvg == null} onClick={() => { if (sellAvg != null) { setCalcMode('sell'); setCalcRate(sellAvg.toFixed(2)); } }}>
-                {t.lang === 'ar' ? 'تطبيق سعر البيع' : 'Apply Sell Rate'}
-              </button>
-              <button className="btn secondary" style={{ justifyContent: 'center' }} disabled={buyAvg == null} onClick={() => { if (buyAvg != null) { setCalcMode('buy'); setCalcRate(buyAvg.toFixed(2)); } }}>
-                {t.lang === 'ar' ? 'تطبيق سعر الشراء' : 'Apply Buy Rate'}
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -572,45 +538,6 @@ export default function P2PTrackerPage() {
               </table>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* ── Calculator ── */}
-      <div className="panel" style={{ marginBottom: 10 }}>
-        <div className="panel-head">
-          <h2>🧮 {t.lang === 'ar' ? 'الآلة الحاسبة' : 'Calculator'}</h2>
-          <div className="modeToggle">
-            <button className={calcMode === 'sell' ? 'active' : ''} onClick={() => { setCalcMode('sell'); setCalcRate(sellAvg != null ? sellAvg.toFixed(2) : ''); }}>{t.lang === 'ar' ? 'بيع' : 'Sell'}</button>
-            <button className={calcMode === 'buy' ? 'active' : ''} onClick={() => { setCalcMode('buy'); setCalcRate(buyAvg != null ? buyAvg.toFixed(2) : ''); }}>{t.lang === 'ar' ? 'شراء' : 'Buy'}</button>
-            <button className={calcMode === 'target' ? 'active' : ''} onClick={() => { setCalcMode('target'); setCalcRate(targetPrice != null ? targetPrice.toFixed(4) : ''); }}>{t.lang === 'ar' ? 'مستهدف' : 'Target'}</button>
-          </div>
-        </div>
-        <div className="panel-body">
-          {!hasLiveSnapshot && (
-            <div className="msg">{t.lang === 'ar' ? 'السعر المباشر غير متاح — أدخل السعر يدوياً' : 'Live rate unavailable — enter a rate manually.'}</div>
-          )}
-          <div className="g2tight" style={{ marginBottom: 8 }}>
-            <div className="field2">
-              <span className="lbl">{t.lang === 'ar' ? 'المبلغ (USDT)' : 'Amount (USDT)'}</span>
-              <div className="inputBox">
-                <input type="number" value={calcAmount} onChange={e => setCalcAmount(e.target.value)} placeholder="1000" />
-              </div>
-            </div>
-            <div className="field2">
-              <span className="lbl">{t.lang === 'ar' ? `السعر (${ccy})` : `Rate (${ccy})`}</span>
-              <div className="inputBox">
-                <input type="number" step="0.001" value={calcRate} onChange={e => setCalcRate(e.target.value)} placeholder="3.80" />
-              </div>
-            </div>
-          </div>
-          {calcResult && (
-            <div className="bannerRow">
-              <span className="bLbl">{calcMode === 'buy' ? (t.lang === 'ar' ? 'التكلفة' : 'Cost') : (t.lang === 'ar' ? 'الإيراد' : 'Revenue')}</span>
-              <span className="bVal">{calcResult.qar.toFixed(2)} {ccy}</span>
-              <span className="bSpacer" />
-              <span className="bPill">@ {calcResult.rate.toFixed(3)}</span>
-            </div>
-          )}
         </div>
       </div>
 

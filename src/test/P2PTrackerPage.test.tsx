@@ -117,4 +117,13 @@ describe('P2PTrackerPage', () => {
 
     await waitFor(() => expect(screen.getByTestId('pair-badge')).toHaveTextContent('USDT/AED'));
   });
+
+  it('does not render the calculator section anymore', async () => {
+    render(<P2PTrackerPage />);
+
+    await screen.findByTestId('status-badge');
+    expect(screen.queryByText('Calculator')).not.toBeInTheDocument();
+    expect(screen.queryByText(/amount \(usdt\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/rate \(qar\)/i)).not.toBeInTheDocument();
+  });
 });
