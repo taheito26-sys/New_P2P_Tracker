@@ -85,8 +85,8 @@ describe('NetworkPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/deal & approval focus/i)).toBeInTheDocument();
-    expect(screen.getByText(/approval overview/i)).toBeInTheDocument();
+    expect(await screen.findByText(/workspace focus/i)).toBeInTheDocument();
+    expect(screen.getByText(/relationship switcher/i)).toBeInTheDocument();
     expect(await screen.findByText(/workspace could not be displayed/i)).toBeInTheDocument();
   });
 
