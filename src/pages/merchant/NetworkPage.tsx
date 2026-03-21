@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Briefcase, Loader2, MessageCircle, Search, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import RelationshipWorkspace from '@/pages/merchant/RelationshipWorkspace';
-import type { MerchantInvite, MerchantMessage, MerchantRelationship, MerchantSearchResult } from '@/types/domain';
+import type { MerchantApproval, MerchantInvite, MerchantMessage, MerchantRelationship, MerchantSearchResult } from '@/types/domain';
 
 type ConversationSummary = {
   relationship: MerchantRelationship;
@@ -87,6 +87,8 @@ export default function NetworkPage() {
     return fallback;
   };
 
+  const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+
   const reload = useCallback(async () => {
     setLoading(true);
     const [invitesRes, sentInvitesRes, relationshipsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
@@ -96,26 +98,32 @@ export default function NetworkPage() {
       api.approvals.sent(),
     ]);
 
-    if (invitesRes.status === 'fulfilled') setInbox(invitesRes.value.invites);
+    if (invitesRes.status === 'fulfilled') setInbox(ensureArray<MerchantInvite>(invitesRes.value?.invites));
     else {
       setInbox([]);
       toast.error(getErrorMessage(invitesRes.reason, 'Invites inbox could not be loaded'));
     }
 
-    if (sentInvitesRes.status === 'fulfilled') setSentInvites(sentInvitesRes.value.invites);
+    if (sentInvitesRes.status === 'fulfilled') setSentInvites(ensureArray<MerchantInvite>(sentInvitesRes.value?.invites));
     else setSentInvites([]);
 
-    const rels = relationshipsRes.status === 'fulfilled' ? relationshipsRes.value.relationships : [];
+    const rels = relationshipsRes.status === 'fulfilled'
+      ? ensureArray<MerchantRelationship>(relationshipsRes.value?.relationships)
+      : [];
     setRelationships(rels);
     if (relationshipsRes.status === 'rejected') toast.error(getErrorMessage(relationshipsRes.reason, 'Relationships could not be loaded'));
 
-    const approvalsInbox = approvalsInboxRes.status === 'fulfilled' ? approvalsInboxRes.value.approvals : [];
-    const approvalsSent = approvalsSentRes.status === 'fulfilled' ? approvalsSentRes.value.approvals : [];
+    const approvalsInbox = approvalsInboxRes.status === 'fulfilled'
+      ? ensureArray<MerchantApproval>(approvalsInboxRes.value?.approvals)
+      : [];
+    const approvalsSent = approvalsSentRes.status === 'fulfilled'
+      ? ensureArray<MerchantApproval>(approvalsSentRes.value?.approvals)
+      : [];
 
     const nextConversationMap: Record<string, ConversationSummary> = {};
     const messageResults = await Promise.allSettled(rels.map(async (relationship) => {
-      const { messages } = await api.messages.list(relationship.id);
-      return { relationshipId: relationship.id, messages };
+      const response = await api.messages.list(relationship.id);
+      return { relationshipId: relationship.id, messages: ensureArray<MerchantMessage>(response?.messages) };
     }));
 
     rels.forEach((relationship, index) => {

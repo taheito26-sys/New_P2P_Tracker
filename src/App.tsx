@@ -107,7 +107,7 @@ const App = () => (
               <Route path="/crm" element={<CRMPage />} />
 
               {/* Network (combined: Directory + Invitations + Relationships + Approvals) */}
-              <Route path="/network" element={<NetworkPage />} />
+              <Route path="/network" element={<RouteErrorBoundary><NetworkPage /></RouteErrorBoundary>} />
               <Route path="/network/relationships/:id" element={<RelationshipWorkspace />} />
 
               {/* Supporting */}
