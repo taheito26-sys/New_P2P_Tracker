@@ -119,22 +119,36 @@ export const merchant = {
     request<{ nickname: string; available: boolean }>(`/api/merchant/check-nickname?nickname=${encodeURIComponent(nickname)}`),
 };
 
+const createInvite = (data: Partial<MerchantInvite>) =>
+  request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', { method: 'POST', body: JSON.stringify(data) });
+
+const acceptInvite = (id: string) =>
+  request<{ ok: boolean; status: 'relationship_created'; relationship_id: string }>(`/api/merchant/invites/${id}/accept`, { method: 'POST' });
+
+const rejectInvite = (id: string) =>
+  request<{ ok: boolean }>(`/api/merchant/invites/${id}/reject`, { method: 'POST' });
+
+const respondToInvite = (id: string, action: 'accept' | 'reject') =>
+  action === 'accept' ? acceptInvite(id) : rejectInvite(id);
+
 export const invites = {
   inbox: () => request<{ invites: MerchantInvite[] }>('/api/merchant/invites/inbox'),
   sent: () => request<{ invites: MerchantInvite[] }>('/api/merchant/invites/sent'),
-  create: (data: Partial<MerchantInvite>) =>
-    request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', { method: 'POST', body: JSON.stringify(data) }),
-  send: (data: Partial<MerchantInvite>) =>
-    request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', { method: 'POST', body: JSON.stringify(data) }),
-  respond: (id: string, action: 'accept' | 'reject') =>
-    request<{ ok: boolean; invite: MerchantInvite }>(`/api/merchant/invites/${id}/${action}`, { method: 'POST' }),
+  create: createInvite,
+  send: createInvite,
+  accept: acceptInvite,
+  reject: rejectInvite,
+  respond: respondToInvite,
   withdraw: (id: string) =>
-    request<{ ok: boolean; invite: MerchantInvite }>(`/api/merchant/invites/${id}/withdraw`, { method: 'POST' }),
+    request<{ ok: boolean }>(`/api/merchant/invites/${id}/withdraw`, { method: 'POST' }),
 };
+
+const getRelationshipDetail = (id: string) => request<{ relationship: MerchantRelationship }>(`/api/merchant/relationships/${id}`);
 
 export const relationships = {
   list: () => request<{ relationships: MerchantRelationship[] }>('/api/merchant/relationships'),
-  detail: (id: string) => request<{ relationship: MerchantRelationship }>(`/api/merchant/relationships/${id}`),
+  detail: getRelationshipDetail,
+  get: getRelationshipDetail,
 };
 
 export const deals = {
@@ -146,7 +160,7 @@ export const deals = {
     ),
 
   create: (data: Partial<MerchantDeal> & { relationship_id: string }) =>
-    request<{ ok: boolean; deal: MerchantDeal }>('/api/merchant/deals', {
+    request<{ ok: boolean; approval_id: string; deal: MerchantDeal }>('/api/merchant/deals', {
       method: 'POST', body: JSON.stringify(data),
     }),
 
@@ -184,9 +198,9 @@ export const messages = {
   list: (relationshipId: string) =>
     request<{ messages: MerchantMessage[] }>(`/api/merchant/messages/${relationshipId}/messages`),
 
-  send: (relationshipId: string, body: string, messageType?: string) =>
+  send: (relationshipId: string, body: string, messageType?: string, metadata?: Record<string, unknown>) =>
     request<{ ok: boolean; message: MerchantMessage }>(`/api/merchant/messages/${relationshipId}/messages`, {
-      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text' }),
+      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text', metadata }),
     }),
 
   markRead: (messageId: string) =>
@@ -195,9 +209,11 @@ export const messages = {
 
 export const approvals = {
   inbox: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/inbox'),
-  mine: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/mine'),
-  review: (id: string, status: 'approved' | 'rejected', resolution_note?: string) =>
-    request<{ ok: boolean; approval: MerchantApproval }>(`/api/merchant/approvals/${id}/review`, { method: 'POST', body: JSON.stringify({ status, resolution_note }) }),
+  sent: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/sent'),
+  approve: (id: string, note?: string) =>
+    request<{ ok: boolean }>(`/api/merchant/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
+  reject: (id: string, note?: string) =>
+    request<{ ok: boolean }>(`/api/merchant/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
 };
 
 export const audit = {
