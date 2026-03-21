@@ -38,6 +38,7 @@ export default function NetworkPage() {
   const [inviteTarget, setInviteTarget] = useState<MerchantSearchResult | null>(null);
   const [inviteForm, setInviteForm] = useState({ purpose: '', role: 'partner', message: '' });
   const [inbox, setInbox] = useState<MerchantInvite[]>([]);
+  const [sentInvites, setSentInvites] = useState<MerchantInvite[]>([]);
   const [relationships, setRelationships] = useState<MerchantRelationship[]>([]);
   const [conversationMap, setConversationMap] = useState<Record<string, ConversationSummary>>({});
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,7 @@ export default function NetworkPage() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const [invitesRes, relationshipsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
+    const [invitesRes, sentInvitesRes, relationshipsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
       api.invites.inbox(),
       api.relationships.list(),
       api.approvals.inbox(),
@@ -66,6 +67,9 @@ export default function NetworkPage() {
       setInbox([]);
       toast.error(getErrorMessage(invitesRes.reason, 'Invites inbox could not be loaded'));
     }
+
+    if (sentInvitesRes.status === 'fulfilled') setSentInvites(sentInvitesRes.value.invites);
+    else setSentInvites([]);
 
     const rels = relationshipsRes.status === 'fulfilled' ? relationshipsRes.value.relationships : [];
     setRelationships(rels);
@@ -138,6 +142,53 @@ export default function NetworkPage() {
       });
       toast.success(`${t('inviteSentTo')} ${inviteTarget.display_name}`);
       setInviteDialogOpen(false);
+      await reload();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const waitForRelationship = useCallback(async (counterpartyMerchantId: string, timeoutMs = 8000) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const { relationships: nextRelationships } = await api.relationships.list();
+      const relationship = nextRelationships.find((item) => item.counterparty?.merchant_id === counterpartyMerchantId);
+      if (relationship) return relationship;
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }
+    return null;
+  }, []);
+
+  const handleAcceptInvite = async (invite: MerchantInvite) => {
+    try {
+      const response = await api.invites.accept(invite.id);
+      const targetRelationshipId = response.relationship_id || (await waitForRelationship(invite.from_merchant_id))?.id;
+      await reload();
+      if (targetRelationshipId) {
+        const next = new URLSearchParams(searchParams);
+        next.set('relationship', targetRelationshipId);
+        setSearchParams(next);
+      }
+      toast.success(t('inviteAccepted'));
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleRejectInvite = async (inviteId: string) => {
+    try {
+      await api.invites.reject(inviteId);
+      toast.success(t('inviteRejected'));
+      await reload();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleWithdrawInvite = async (inviteId: string) => {
+    try {
+      await api.invites.withdraw(inviteId);
+      toast.success(t('inviteWithdrawn'));
       await reload();
     } catch (err: any) {
       toast.error(err.message);
@@ -271,16 +322,48 @@ export default function NetworkPage() {
               </div>
             )}
 
-            {inbox.filter((invite) => invite.status === 'pending').length > 0 && (
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900">
-                <p className="font-semibold">Pending invites</p>
-                <div className="mt-2 space-y-2">
-                  {inbox.filter((invite) => invite.status === 'pending').map((invite) => (
-                    <div key={invite.id} className="rounded-xl bg-background/80 px-3 py-2">
-                      {invite.from_display_name || invite.from_merchant_id} · {invite.purpose || t('generalCollaboration')}
+            {(inbox.filter((invite) => invite.status === 'pending').length > 0 || sentInvites.filter((invite) => invite.status === 'pending').length > 0) && (
+              <div className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+                {inbox.filter((invite) => invite.status === 'pending').length > 0 && (
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">Incoming invites</p>
+                    <div className="mt-2 space-y-2">
+                      {inbox.filter((invite) => invite.status === 'pending').map((invite) => (
+                        <div key={invite.id} className="rounded-xl bg-background/85 px-3 py-3">
+                          <p className="text-sm font-medium text-foreground">{invite.from_display_name || invite.from_merchant_id}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{invite.purpose || t('generalCollaboration')} · {t('role')}: {invite.requested_role}</p>
+                          {invite.message ? <p className="mt-2 text-xs italic text-muted-foreground">“{invite.message}”</p> : null}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button size="sm" onClick={() => handleAcceptInvite(invite)}>{t('accept')}</Button>
+                            <Button size="sm" variant="outline" onClick={() => handleRejectInvite(invite.id)}>{t('reject')}</Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
+
+                {sentInvites.filter((invite) => invite.status === 'pending').length > 0 && (
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">Sent invites</p>
+                    <div className="mt-2 space-y-2">
+                      {sentInvites.filter((invite) => invite.status === 'pending').map((invite) => (
+                        <div key={invite.id} className="rounded-xl bg-background/85 px-3 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">{invite.to_display_name || invite.to_merchant_id}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{invite.purpose || t('generalCollaboration')}</p>
+                            </div>
+                            <Badge variant="outline">Waiting for recipient</Badge>
+                          </div>
+                          <div className="mt-3">
+                            <Button size="sm" variant="outline" onClick={() => handleWithdrawInvite(invite.id)}>{t('withdraw')}</Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
