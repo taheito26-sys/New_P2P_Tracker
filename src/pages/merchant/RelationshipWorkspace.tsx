@@ -90,58 +90,31 @@ function RelationshipWorkspaceCore() {
     setLoadState((prev) => (prev === 'ready' ? 'ready' : 'loading'));
 
     const startedAt = Date.now();
-    const retryWindowMs = 2000;
+    const retryWindowMs = 8000;
 
     while (Date.now() - startedAt < retryWindowMs) {
       try {
-        const { relationship } = await api.relationships.get(id);
-        setRel(relationship);
-
-        const [messagesRes, dealsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
-          api.messages.list(id),
-          api.deals.list(id),
-          api.approvals.inbox(),
-          api.approvals.sent(),
+        const [
+          { relationship }, messagesResult, { deals: relDealsData }, { approvals: inbox }, { approvals: sent }
+        ] = await Promise.all([
+          api.relationships.get(id), api.messages.list(id), api.deals.list(id), api.approvals.inbox(), api.approvals.sent()
         ]);
-
-        if (messagesRes.status === 'fulfilled') {
-          const unreadIncoming = messagesRes.value.messages.filter(m => !m.is_read && m.sender_user_id !== userId);
-          if (unreadIncoming.length > 0) {
-            await Promise.all(unreadIncoming.map((message) => api.messages.markRead(message.id)));
-            const refreshedMessages = await api.messages.list(id);
-            setMsgs(refreshedMessages.messages);
-          } else {
-            setMsgs(messagesRes.value.messages);
-          }
-        } else {
-          console.error('[RelationshipWorkspace] messages fetch failed', { relationshipId: id, error: messagesRes.reason });
-          setMsgs([]);
+        const unreadIncoming = messagesResult.messages.filter(m => !m.is_read && m.sender_user_id !== userId);
+        if (unreadIncoming.length > 0) {
+          await Promise.all(unreadIncoming.map((message) => api.messages.markRead(message.id)));
         }
-
-        if (dealsRes.status === 'fulfilled') {
-          setRelDeals(dealsRes.value.deals);
-        } else {
-          console.error('[RelationshipWorkspace] deals fetch failed', { relationshipId: id, error: dealsRes.reason });
-          setRelDeals([]);
-        }
-
-        const approvalsInbox = approvalsInboxRes.status === 'fulfilled' ? approvalsInboxRes.value.approvals : [];
-        const approvalsSent = approvalsSentRes.status === 'fulfilled' ? approvalsSentRes.value.approvals : [];
-        if (approvalsInboxRes.status === 'rejected') {
-          console.error('[RelationshipWorkspace] approvals inbox fetch failed', { relationshipId: id, error: approvalsInboxRes.reason });
-        }
-        if (approvalsSentRes.status === 'rejected') {
-          console.error('[RelationshipWorkspace] approvals sent fetch failed', { relationshipId: id, error: approvalsSentRes.reason });
-        }
-        setRelApprovals([...approvalsInbox, ...approvalsSent].filter(a => a.relationship_id === id));
-
+        const { messages } = unreadIncoming.length > 0 ? await api.messages.list(id) : messagesResult;
+        setRel(relationship);
+        setMsgs(messages);
+        setRelDeals(relDealsData);
+        setRelApprovals([...inbox, ...sent].filter(a => a.relationship_id === id));
         setLoadState('ready');
         setLoading(false);
         return;
       } catch (err) {
         if (err instanceof api.ApiError) {
           if (err.status === 404) {
-            console.warn('[RelationshipWorkspace] relationship lookup returned 404, retrying briefly', { relationshipId: id, status: err.status });
+            console.warn('[RelationshipWorkspace] relationship not found yet, retrying', { relationshipId: id, status: err.status });
             setLoadState('retrying');
             await new Promise((resolve) => window.setTimeout(resolve, 500));
             continue;
@@ -163,7 +136,7 @@ function RelationshipWorkspaceCore() {
       }
     }
 
-    console.warn('[RelationshipWorkspace] relationship could not be opened after retry window', { relationshipId: id });
+    console.warn('[RelationshipWorkspace] relationship not found after retry window', { relationshipId: id });
     setLoadState('not_found');
     setLoading(false);
   }, [id, t, userId]);
@@ -255,14 +228,14 @@ function RelationshipWorkspaceCore() {
       <div className="flex h-[50vh] flex-col items-center justify-center gap-3 text-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">{t('loading') || 'Loading'}</p>
-          <p className="text-xs text-muted-foreground">{loadState === 'retrying' ? 'Retrying workspace lookup…' : 'Loading workspace data…'}</p>
+          <p className="text-sm font-medium text-foreground">{loadState === 'retrying' ? 'Finalizing relationship workspace…' : (t('loading') || 'Loading')}</p>
+          <p className="text-xs text-muted-foreground">{loadState === 'retrying' ? 'Your accepted invite is being linked to a workspace. Retrying automatically…' : 'Loading workspace data…'}</p>
         </div>
       </div>
     );
   }
   if (loadState === 'forbidden') return <div className="p-6 text-center text-muted-foreground">You do not have access to this relationship workspace.</div>;
-  if (loadState === 'not_found') return <div className="p-6 text-center text-muted-foreground">This relationship could not be opened.</div>;
+  if (loadState === 'not_found') return <div className="p-6 text-center text-muted-foreground">This relationship workspace is not available yet. Please try again in a moment.</div>;
   if (loadState === 'error' || !rel) return <div className="p-6 text-center text-muted-foreground">{t('relationshipNotFound')}</div>;
 
   const pendingApprovals = relApprovals.filter(a => a.status === 'pending');
