@@ -130,6 +130,8 @@ describe('RelationshipWorkspace', () => {
     expect(await screen.findByText('Deal type')).toBeInTheDocument();
     expect(screen.getByText('Ratio')).toBeInTheDocument();
     expect(screen.getByText('50% / 50%')).toBeInTheDocument();
+    expect(screen.getByText('Outstanding')).toBeInTheDocument();
+    expect(screen.getAllByText('$1,820').length).toBeGreaterThan(0);
     expect(screen.getByText('Actions')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'approve' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'reject' })).toBeInTheDocument();
