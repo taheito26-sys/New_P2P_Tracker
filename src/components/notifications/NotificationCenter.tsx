@@ -34,6 +34,19 @@ function actionButtonClass(variant: NotificationAction['variant'] = 'secondary')
   return 'inline-flex items-center justify-center rounded-md px-2.5 py-1 text-xs font-medium border border-border bg-background hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
 }
 
+async function waitForRelationship(counterpartyMerchantId: string, timeoutMs = 8000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const { relationships } = await api.relationships.list();
+    const relationship = relationships.find((rel) => rel.counterparty?.merchant_id === counterpartyMerchantId);
+    if (relationship) return relationship;
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+  }
+
+  return null;
+}
+
 export default function NotificationCenter() {
   const navigate = useNavigate();
   const { userId } = useAuth();
@@ -207,8 +220,19 @@ export default function NotificationCenter() {
           label: t('accept') || 'Accept',
           variant: 'primary',
           onSelect: () => runAction(`accept-invite-${invite.id}`, async () => {
-            await api.invites.accept(invite.id);
+            const response = await api.invites.accept(invite.id);
+            console.info('[NotificationCenter] invite accepted', {
+              inviteId: invite.id,
+              relationshipId: response.relationship_id,
+              counterpartyMerchantId: invite.from_merchant_id,
+            });
             setAnnounce(`Invite accepted from ${invite.from_display_name}`);
+
+            const targetRelationshipId = response.relationship_id || (await waitForRelationship(invite.from_merchant_id))?.id;
+            if (targetRelationshipId) {
+              navigate(`/network/relationships/${targetRelationshipId}`);
+              setOpen(false);
+            }
           }),
         },
         {
