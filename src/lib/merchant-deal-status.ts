@@ -9,6 +9,10 @@ export function getAllowedDealStatusTransitions(status: DealStatus): DealStatus[
   return [...DEAL_STATUS_TRANSITIONS[status]];
 }
 
+export function normalizeDealStatus(status: string | null | undefined): DealStatus | 'pending' {
+  return status === 'approved' ? 'approved' : 'pending';
+}
+
 export function canTransitionDealStatus(current: DealStatus, next: DealStatus): boolean {
   return current === next || DEAL_STATUS_TRANSITIONS[current].includes(next);
 }
