@@ -16,6 +16,7 @@ import type {
   P2PSnapshot,
   P2PHistoryPoint
 } from '@/types/domain';
+import { normalizeMarketId } from '@/lib/p2p-markets';
 
 export interface PortfolioAnalytics {
   totalDeployed: number;
@@ -31,7 +32,6 @@ export interface PortfolioAnalytics {
   riskIndicators: { type: string; severity: 'high' | 'medium' | 'low'; message: string }[];
 }
 
-// ─── Configuration ──────────────────────────────────────────────────
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
   if (configured) {
@@ -42,7 +42,6 @@ function resolveApiBase(): string {
 
 const API_BASE = resolveApiBase();
 
-// ─── HTTP Transport ─────────────────────────────────────────────────
 async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -74,7 +73,6 @@ export class ApiError extends Error {
   }
 }
 
-// ─── Auth API ───────────────────────────────────────────────────────
 export const auth = {
   signup: (email: string, password: string) =>
     request<{ ok: boolean }>('/api/auth/signup', {
@@ -98,7 +96,6 @@ export const auth = {
     request<{ user_id: string; email: string } | null>('/api/auth/session'),
 };
 
-// ─── Merchant Profile API ───────────────────────────────────────────
 export const merchant = {
   getMyProfile: () =>
     request<{ profile: MerchantProfile | null }>('/api/merchant/profile/me'),
@@ -122,121 +119,42 @@ export const merchant = {
     request<{ nickname: string; available: boolean }>(`/api/merchant/check-nickname?nickname=${encodeURIComponent(nickname)}`),
 };
 
-// ─── Invites API ────────────────────────────────────────────────────
 export const invites = {
-  send: (data: {
-    to_merchant_id: string;
-    purpose?: string;
-    requested_role?: string;
-    message?: string;
-    requested_scope?: string[];
-  }) =>
-    request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', {
-      method: 'POST', body: JSON.stringify(data),
-    }),
-
-  inbox: () =>
-    request<{ invites: MerchantInvite[] }>('/api/merchant/invites/inbox'),
-
-  sent: () =>
-    request<{ invites: MerchantInvite[] }>('/api/merchant/invites/sent'),
-
-  accept: (id: string) =>
-    request<{ ok: boolean; relationship_id: string }>(`/api/merchant/invites/${id}/accept`, { method: 'POST' }),
-
-  reject: (id: string) =>
-    request<{ ok: boolean }>(`/api/merchant/invites/${id}/reject`, { method: 'POST' }),
-
+  inbox: () => request<{ invites: MerchantInvite[] }>('/api/merchant/invites/inbox'),
+  sent: () => request<{ invites: MerchantInvite[] }>('/api/merchant/invites/sent'),
+  create: (data: Partial<MerchantInvite>) =>
+    request<{ ok: boolean; invite: MerchantInvite }>('/api/merchant/invites', { method: 'POST', body: JSON.stringify(data) }),
+  respond: (id: string, action: 'accept' | 'reject') =>
+    request<{ ok: boolean; invite: MerchantInvite }>(`/api/merchant/invites/${id}/${action}`, { method: 'POST' }),
   withdraw: (id: string) =>
-    request<{ ok: boolean }>(`/api/merchant/invites/${id}/withdraw`, { method: 'POST' }),
+    request<{ ok: boolean; invite: MerchantInvite }>(`/api/merchant/invites/${id}/withdraw`, { method: 'POST' }),
 };
 
-// ─── Relationships API ──────────────────────────────────────────────
 export const relationships = {
-  list: () =>
-    request<{ relationships: MerchantRelationship[] }>('/api/merchant/relationships'),
-
-  get: (id: string) =>
-    request<{ relationship: MerchantRelationship }>(`/api/merchant/relationships/${id}`),
+  list: () => request<{ relationships: MerchantRelationship[] }>('/api/merchant/relationships'),
+  detail: (id: string) => request<{ relationship: MerchantRelationship }>(`/api/merchant/relationships/${id}`),
 };
 
-// ─── Deals API ──────────────────────────────────────────────────────
 export const deals = {
-  list: (relationshipId?: string) =>
-    request<{ deals: MerchantDeal[] }>(
-      relationshipId
-        ? `/api/merchant/deals?relationship_id=${relationshipId}`
-        : '/api/merchant/deals'
-    ),
-
-  create: (data: Partial<MerchantDeal> & { relationship_id: string }) =>
-    request<{ ok: boolean; deal: MerchantDeal }>('/api/merchant/deals', {
-      method: 'POST', body: JSON.stringify(data),
-    }),
-
-  update: (id: string, data: Partial<MerchantDeal>) =>
-    request<{ ok: boolean; deal: MerchantDeal }>(`/api/merchant/deals/${id}`, {
-      method: 'PATCH', body: JSON.stringify(data),
-    }),
-
-  deletePermanent: (id: string) =>
-    request<{ ok: boolean; deleted: string }>(`/api/merchant/deals/${id}`, {
-      method: 'DELETE',
-    }),
-
-  delete: (id: string) =>
-    deals.deletePermanent(id),
-
-  submitSettlement: (dealId: string, data: { amount: number; currency?: string; note?: string }) =>
-    request<{ ok: boolean; settlement_id: string; approval_id: string }>(`/api/merchant/deals/${dealId}/submit-settlement`, {
-      method: 'POST', body: JSON.stringify(data),
-    }),
-
-  recordProfit: (dealId: string, data: { amount: number; period_key?: string; currency?: string; note?: string }) =>
-    request<{ ok: boolean; profit_id: string; approval_id: string }>(`/api/merchant/deals/${dealId}/record-profit`, {
-      method: 'POST', body: JSON.stringify(data),
-    }),
-
-  close: (dealId: string, data?: { close_date?: string; note?: string }) =>
-    request<{ ok: boolean; approval_id: string }>(`/api/merchant/deals/${dealId}/close`, {
-      method: 'POST', body: JSON.stringify(data || {}),
-    }),
+  list: (relationshipId: string) => request<{ deals: MerchantDeal[] }>(`/api/merchant/deals?relationship_id=${relationshipId}`),
+  create: (data: Partial<MerchantDeal>) => request<{ ok: boolean; deal: MerchantDeal }>('/api/merchant/deals', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<MerchantDeal>) => request<{ ok: boolean; deal: MerchantDeal }>(`/api/merchant/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id: string) => request<{ ok: boolean; deleted: string }>(`/api/merchant/deals/${id}`, { method: 'DELETE' }),
 };
 
-// ─── Messages API ───────────────────────────────────────────────────
-export const messages = {
-  list: (relationshipId: string) =>
-    request<{ messages: MerchantMessage[] }>(`/api/merchant/messages/${relationshipId}/messages`),
-
-  send: (relationshipId: string, body: string, messageType?: string) =>
-    request<{ ok: boolean; message: MerchantMessage }>(`/api/merchant/messages/${relationshipId}/messages`, {
-      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text' }),
-    }),
-
-  markRead: (messageId: string) =>
-    request<{ ok: boolean }>(`/api/merchant/messages/mark-read/${messageId}`, { method: 'POST' }),
-};
-
-// ─── Approvals API ──────────────────────────────────────────────────
 export const approvals = {
-  inbox: () =>
-    request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/inbox'),
-
-  sent: () =>
-    request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/sent'),
-
-  approve: (id: string, note?: string) =>
-    request<{ ok: boolean }>(`/api/merchant/approvals/${id}/approve`, {
-      method: 'POST', body: JSON.stringify({ note }),
-    }),
-
-  reject: (id: string, note?: string) =>
-    request<{ ok: boolean }>(`/api/merchant/approvals/${id}/reject`, {
-      method: 'POST', body: JSON.stringify({ note }),
-    }),
+  inbox: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/inbox'),
+  mine: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/mine'),
+  review: (id: string, status: 'approved' | 'rejected', resolution_note?: string) =>
+    request<{ ok: boolean; approval: MerchantApproval }>(`/api/merchant/approvals/${id}/review`, { method: 'POST', body: JSON.stringify({ status, resolution_note }) }),
 };
 
-// ─── Audit API ──────────────────────────────────────────────────────
+export const messages = {
+  list: (relationshipId: string) => request<{ messages: MerchantMessage[] }>(`/api/merchant/messages?relationship_id=${relationshipId}`),
+  send: (data: Partial<MerchantMessage>) => request<{ ok: boolean; message: MerchantMessage }>('/api/merchant/messages', { method: 'POST', body: JSON.stringify(data) }),
+  markRead: (id: string) => request<{ ok: boolean }>(`/api/merchant/messages/${id}/read`, { method: 'POST' }),
+};
+
 export const audit = {
   relationship: (relationshipId: string) =>
     request<{ logs: AuditLog[] }>(`/api/merchant/audit/relationship/${relationshipId}`),
@@ -245,7 +163,6 @@ export const audit = {
     request<{ logs: AuditLog[] }>('/api/merchant/audit/activity'),
 };
 
-// ─── Notifications API ──────────────────────────────────────────────
 export const notifications = {
   list: (limit = 50, unread = false) =>
     request<{ notifications: MerchantNotification[] }>(
@@ -262,7 +179,6 @@ export const notifications = {
     request<{ ok: boolean }>('/api/merchant/notifications/read-all', { method: 'POST' }),
 };
 
-// ─── Trading API ────────────────────────────────────────────────────
 export const trading = {
   getBatches: (assetSymbol?: string) =>
     request<{ batches: Batch[] }>(
@@ -302,25 +218,26 @@ export const trading = {
     request<{ ok: boolean; deleted: string }>(`/api/trades/${id}`, { method: 'DELETE' }),
 };
 
-// ─── P2P Tracker API ────────────────────────────────────────────────
 export const p2p = {
   status: () =>
     request<{ ok: boolean; lastUpdate: string }>('/api/status'),
 
-  latest: (market?: string) =>
-    request<P2PSnapshot>(market && market !== 'qatar' ? `/api/latest?market=${market}` : '/api/latest'),
+  latest: (market?: string) => {
+    const canonicalMarket = normalizeMarketId(market);
+    return request<P2PSnapshot>(`/api/latest?market=${encodeURIComponent(canonicalMarket)}`);
+  },
 
-  history: (market?: string) =>
-    request<P2PHistoryPoint[]>(market && market !== 'qatar' ? `/api/history?market=${market}` : '/api/history'),
+  history: (market?: string) => {
+    const canonicalMarket = normalizeMarketId(market);
+    return request<P2PHistoryPoint[]>(`/api/history?market=${encodeURIComponent(canonicalMarket)}`);
+  },
 };
 
-// ─── Analytics API ──────────────────────────────────────────────────
 export const analytics = {
   get: () =>
     request<PortfolioAnalytics>('/api/analytics'),
 };
 
-// ─── Polling fallback for real-time ─────────────────────────────────
 export const poll = {
   changes: (since: string) =>
     request<{ invites: MerchantInvite[]; messages: MerchantMessage[] }>(
