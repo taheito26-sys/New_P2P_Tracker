@@ -56,6 +56,25 @@ export default function InvitationsPage() {
     return null;
   };
 
+  const waitForRelationshipWorkspace = async (relationshipId: string, timeoutMs = 8000) => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        await api.relationships.get(relationshipId);
+        return true;
+      } catch (err) {
+        if (err instanceof api.ApiError && err.status === 404) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return false;
+  };
+
   const handleAccept = async (invite: MerchantInvite) => {
     try {
       const response = await invitesApi.accept(invite.id);
@@ -69,6 +88,7 @@ export default function InvitationsPage() {
 
       const targetRelationshipId = response.relationship_id || (await waitForRelationship(invite.from_merchant_id))?.id;
       if (targetRelationshipId) {
+        await waitForRelationshipWorkspace(targetRelationshipId);
         navigate(`/network/relationships/${targetRelationshipId}`);
       }
     }

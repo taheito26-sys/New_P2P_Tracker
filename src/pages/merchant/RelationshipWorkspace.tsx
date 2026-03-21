@@ -94,20 +94,47 @@ function RelationshipWorkspaceCore() {
 
     while (Date.now() - startedAt < retryWindowMs) {
       try {
-        const [
-          { relationship }, messagesResult, { deals: relDealsData }, { approvals: inbox }, { approvals: sent }
-        ] = await Promise.all([
-          api.relationships.get(id), api.messages.list(id), api.deals.list(id), api.approvals.inbox(), api.approvals.sent()
-        ]);
-        const unreadIncoming = messagesResult.messages.filter(m => !m.is_read && m.sender_user_id !== userId);
-        if (unreadIncoming.length > 0) {
-          await Promise.all(unreadIncoming.map((message) => api.messages.markRead(message.id)));
-        }
-        const { messages } = unreadIncoming.length > 0 ? await api.messages.list(id) : messagesResult;
+        const { relationship } = await api.relationships.get(id);
         setRel(relationship);
-        setMsgs(messages);
-        setRelDeals(relDealsData);
-        setRelApprovals([...inbox, ...sent].filter(a => a.relationship_id === id));
+
+        const [messagesRes, dealsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
+          api.messages.list(id),
+          api.deals.list(id),
+          api.approvals.inbox(),
+          api.approvals.sent(),
+        ]);
+
+        if (messagesRes.status === 'fulfilled') {
+          const unreadIncoming = messagesRes.value.messages.filter(m => !m.is_read && m.sender_user_id !== userId);
+          if (unreadIncoming.length > 0) {
+            await Promise.all(unreadIncoming.map((message) => api.messages.markRead(message.id)));
+            const refreshedMessages = await api.messages.list(id);
+            setMsgs(refreshedMessages.messages);
+          } else {
+            setMsgs(messagesRes.value.messages);
+          }
+        } else {
+          console.error('[RelationshipWorkspace] messages fetch failed', { relationshipId: id, error: messagesRes.reason });
+          setMsgs([]);
+        }
+
+        if (dealsRes.status === 'fulfilled') {
+          setRelDeals(dealsRes.value.deals);
+        } else {
+          console.error('[RelationshipWorkspace] deals fetch failed', { relationshipId: id, error: dealsRes.reason });
+          setRelDeals([]);
+        }
+
+        const approvalsInbox = approvalsInboxRes.status === 'fulfilled' ? approvalsInboxRes.value.approvals : [];
+        const approvalsSent = approvalsSentRes.status === 'fulfilled' ? approvalsSentRes.value.approvals : [];
+        if (approvalsInboxRes.status === 'rejected') {
+          console.error('[RelationshipWorkspace] approvals inbox fetch failed', { relationshipId: id, error: approvalsInboxRes.reason });
+        }
+        if (approvalsSentRes.status === 'rejected') {
+          console.error('[RelationshipWorkspace] approvals sent fetch failed', { relationshipId: id, error: approvalsSentRes.reason });
+        }
+        setRelApprovals([...approvalsInbox, ...approvalsSent].filter(a => a.relationship_id === id));
+
         setLoadState('ready');
         setLoading(false);
         return;
