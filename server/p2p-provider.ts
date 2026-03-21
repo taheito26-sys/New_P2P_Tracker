@@ -148,8 +148,44 @@ async function getSnapshotFromKV(env: ProviderEnv, market: P2PMarket): Promise<P
     if (!raw || typeof raw !== 'object') return null;
     return normalizeSnapshotRecord(raw, market);
   } catch (error) {
+<<<<<<< HEAD
     console.error('[p2p] failed to read snapshot from KV', { market, error });
     return null;
+=======
+    console.error('[p2p.sync] failed to read snapshot from KV', { market, error });
+    return null;
+  }
+}
+
+async function getSyncMeta(env: ProviderEnv, market: P2PMarket): Promise<SyncMeta> {
+  try {
+    const raw = await env.P2P_KV.get(syncMetaKey(market), 'json') as SyncMeta | null;
+    if (!raw || typeof raw !== 'object') return initialSyncMeta(env);
+    return {
+      ...initialSyncMeta(env),
+      ...raw,
+      version: typeof raw.version === 'number' ? raw.version : 0,
+      lamport: typeof raw.lamport === 'number' ? raw.lamport : 0,
+      invalidationVersion: typeof raw.invalidationVersion === 'number' ? raw.invalidationVersion : 0,
+      consecutiveFailures: typeof raw.consecutiveFailures === 'number' ? raw.consecutiveFailures : 0,
+      quarantineUntil: typeof raw.quarantineUntil === 'string' ? raw.quarantineUntil : null,
+    };
+  } catch (error) {
+    console.error('[p2p.sync] failed to read sync metadata', { market, error });
+    return initialSyncMeta(env);
+  }
+}
+
+async function putSyncMeta(env: ProviderEnv, market: P2PMarket, meta: SyncMeta): Promise<void> {
+  await env.P2P_KV.put(syncMetaKey(market), JSON.stringify(meta));
+}
+
+function invalidateMemoryCache(market: P2PMarket, invalidationVersion: number) {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return;
+  if (entry.invalidationVersion < invalidationVersion) {
+    memorySnapshotCache.delete(market);
+>>>>>>> 7d040e22650fbf645e94544fa963ad32f95fd39d
   }
 }
 
@@ -259,6 +295,7 @@ async function fetchLiveSnapshot(market: P2PMarket): Promise<P2PSnapshot> {
   throw lastError instanceof Error ? lastError : new Error('binance_poll_failed');
 }
 
+<<<<<<< HEAD
 // ── KV write (ONLY from cron) ───────────────────────────────────────
 
 async function persistSnapshot(env: ProviderEnv, snapshot: P2PSnapshot): Promise<P2PHistoryPoint[]> {
@@ -283,6 +320,22 @@ function staleSnapshot(snapshot: P2PSnapshot, retryCount: number): P2PSnapshot {
 // ── Public API ──────────────────────────────────────────────────────
 
 /** Cron-only: poll Binance and persist to KV. */
+=======
+async function fetchTransientLiveSnapshot(market: P2PMarket, env: ProviderEnv): Promise<P2PSnapshot> {
+  const meta = await getSyncMeta(env, market);
+  if (meta.quarantineUntil && new Date(meta.quarantineUntil).getTime() > Date.now()) {
+    throw new Error(`upstream_quarantined_until:${meta.quarantineUntil}`);
+  }
+
+  const snapshot = await fetchLiveSnapshot(market, env);
+  return cloneSnapshot(snapshot, {
+    version: meta.version,
+    lamport: meta.lamport,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+  });
+}
+
+>>>>>>> 7d040e22650fbf645e94544fa963ad32f95fd39d
 export async function refreshP2PMarketSnapshot(marketInput: string, env: ProviderEnv): Promise<{ snapshot: P2PSnapshot; history: P2PHistoryPoint[] }> {
   const market = normalizeMarketId(marketInput);
   const snapshot = await fetchLiveSnapshot(market);
@@ -290,7 +343,40 @@ export async function refreshP2PMarketSnapshot(marketInput: string, env: Provide
   return { snapshot, history };
 }
 
+<<<<<<< HEAD
 /** Read-only for /api/latest: memory → KV → on-demand poll (no KV writes). */
+=======
+export async function getP2PSnapshot(marketInput: string | undefined, env: ProviderEnv): Promise<P2PSnapshot> {
+  const market = normalizeMarketId(marketInput);
+  await runAntiEntropyPull(env, market);
+  const memoryCached = await getSnapshotFromMemoryCache(env, market);
+  if (memoryCached) return memoryCached;
+  const cached = await getSnapshotFromKV(env, market);
+  if (cached) {
+    const meta = await getSyncMeta(env, market);
+    const fromKv = cloneSnapshot(cached, {
+      servedFrom: 'kv',
+      cacheAgeMs: Date.now() - cached.ts,
+      replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+      version: meta.version,
+      lamport: meta.lamport,
+      peerSource: meta.peerSource,
+    });
+    cacheSnapshot(fromKv, meta.invalidationVersion);
+    return fromKv;
+  }
+  return await fetchTransientLiveSnapshot(market, env);
+}
+
+export async function getP2PHistory(marketInput: string | undefined, env: ProviderEnv): Promise<P2PHistoryPoint[]> {
+  const market = normalizeMarketId(marketInput);
+  const history = await getHistoryFromKV(env, market);
+  if (history.length > 0) return history;
+  const snapshot = await getP2PSnapshotWithFallback(market, env);
+  return snapshot.source === 'live' ? await getHistoryFromKV(env, market) : [];
+}
+
+>>>>>>> 7d040e22650fbf645e94544fa963ad32f95fd39d
 export async function getP2PSnapshotWithFallback(marketInput: string | undefined, env: ProviderEnv): Promise<P2PSnapshot> {
   const market = normalizeMarketId(marketInput);
 
@@ -306,8 +392,12 @@ export async function getP2PSnapshotWithFallback(marketInput: string | undefined
   }
 
   try {
+<<<<<<< HEAD
     const snapshot = await fetchLiveSnapshot(market);
     cacheSnapshot(snapshot);
+=======
+    const snapshot = await fetchTransientLiveSnapshot(market, env);
+>>>>>>> 7d040e22650fbf645e94544fa963ad32f95fd39d
     return snapshot;
   } catch (error) {
     if (cached && cached.source === 'live') {
@@ -334,6 +424,16 @@ export async function scheduledRefreshAllMarkets(env: ProviderEnv, log: Pick<Con
       log.info(`[p2p] refreshed market=${market} source=${snapshot.source} history=${history.length} stale=${snapshot.stale}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const meta = await getSyncMeta(env, market);
+      const failures = meta.consecutiveFailures + 1;
+      const quarantineUntil = failures >= PEER_FAILURE_THRESHOLD
+        ? new Date(Date.now() + PEER_FAILURE_QUARANTINE_MS).toISOString()
+        : null;
+      await putSyncMeta(env, market, {
+        ...meta,
+        consecutiveFailures: failures,
+        quarantineUntil,
+      });
       log.error(`[p2p] refresh failed market=${market} error=${message}`);
     }
   }));
