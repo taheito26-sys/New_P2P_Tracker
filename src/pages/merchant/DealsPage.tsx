@@ -1,388 +1,380 @@
-import { useState, useEffect, useCallback } from 'react';
-import { deals as dealsApi, relationships as relationshipsApi } from '@/lib/api';
-import { useAuth } from '@/lib/auth-context';
-import { useT } from '@/lib/i18n';
-import { toast } from 'sonner';
+import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Badge } from '@/components/ui/badge';
-import { Briefcase } from 'lucide-react';
-import { getAgreementFamilyLabel, getDealShares } from '@/lib/deal-templates';
-import { isSupportedDealType } from '@/types/domain';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getAllowedDealStatusTransitions } from '@/lib/merchant-deal-status';
-import type { MerchantDeal, MerchantRelationship } from '@/types/domain';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { agreementTemplates, merchantAgreements, ApiError } from '@/lib/api';
+import { demoTradingData } from '@/lib/trading/demo-data';
+import { economicTermsChanged } from '@/lib/trading/utils';
+import type { AgreementTemplate, CalculationConfig, MerchantAgreement } from '@/lib/trading/types';
 
-const statusColors: Record<string, string> = {
-  pending: 'bg-warning text-warning-foreground',
-  approved: 'bg-success text-success-foreground',
+const defaultTemplateForm = {
+  name: '',
+  agreementType: 'profit_share' as AgreementTemplate['agreementType'],
+  calculationMethod: 'profit_share' as AgreementTemplate['calculationMethod'],
+  value: '0',
+  defaultCurrency: 'USD',
+  notes: '',
 };
 
-function canDeleteDeal(deal: MerchantDeal): boolean {
-  return deal.status === 'pending' && deal.realized_pnl == null && !deal.close_date;
+const defaultAgreementForm = {
+  templateId: '',
+  merchantId: '',
+  merchantName: '',
+  title: '',
+};
+
+function configFromForm(type: AgreementTemplate['agreementType'], value: string): CalculationConfig {
+  const numeric = Number(value);
+  switch (type) {
+    case 'profit_share': return { profitSharePercent: numeric, percentages: { merchant: numeric }, currencyAssumptions: ['USD'] };
+    case 'fixed_margin': return { fixedMarginAmount: numeric, fixedValues: { marginPerUnit: numeric }, currencyAssumptions: ['USD'] };
+    case 'spread': return { spreadPercent: numeric, percentages: { spread: numeric }, currencyAssumptions: ['USD'] };
+    case 'commission': return { commissionPercent: numeric, percentages: { commission: numeric }, currencyAssumptions: ['USD'] };
+    case 'custom': return { percentages: { custom: numeric }, fixedValues: {}, customFormulaLabel: 'Custom formula', currencyAssumptions: ['USD'] };
+  }
 }
 
 export default function DealsPage() {
-  const { userId } = useAuth();
-  const t = useT();
-  const [allDeals, setAllDeals] = useState<MerchantDeal[]>([]);
-  const [relationships, setRelationships] = useState<MerchantRelationship[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadErrors, setLoadErrors] = useState<{ deals: string | null; relationships: string | null }>({
-    deals: null,
-    relationships: null,
-  });
+  const [templates, setTemplates] = useState<AgreementTemplate[]>([]);
+  const [agreements, setAgreements] = useState<MerchantAgreement[]>([]);
+  const [templateDialog, setTemplateDialog] = useState(false);
+  const [agreementDialog, setAgreementDialog] = useState(false);
+  const [templateForm, setTemplateForm] = useState(defaultTemplateForm);
+  const [agreementForm, setAgreementForm] = useState(defaultAgreementForm);
+  const [editingTemplate, setEditingTemplate] = useState<AgreementTemplate | null>(null);
+  const [editingAgreement, setEditingAgreement] = useState<MerchantAgreement | null>(null);
+  const [usingDemo, setUsingDemo] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ kind: 'template' | 'agreement'; id: string } | null>(null);
 
-  // Edit state
-  const [editingDeal, setEditingDeal] = useState<MerchantDeal | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editAmount, setEditAmount] = useState('');
-  const [editStatus, setEditStatus] = useState('');
-  const [editNote, setEditNote] = useState('');
-
-  // Delete confirm
-  const [deleteDealId, setDeleteDealId] = useState<string | null>(null);
-
-  const getErrorMessage = (err: unknown, fallback: string) => {
-    if (err instanceof Error && err.message) return err.message;
-    if (typeof err === 'object' && err && 'message' in err && typeof (err as { message?: unknown }).message === 'string') {
-      return (err as { message: string }).message;
-    }
-    return fallback;
-  };
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    const [dealsRes, relationshipsRes] = await Promise.allSettled([
-      dealsApi.list(),
-      relationshipsApi.list(),
-    ]);
-
-    const nextErrors = { deals: null as string | null, relationships: null as string | null };
-
-    if (dealsRes.status === 'fulfilled') {
-      setAllDeals(dealsRes.value.deals);
-    } else {
-      const message = getErrorMessage(dealsRes.reason, t('failedLoadDeals'));
-      console.error('[DealsPage] failed to load deals', dealsRes.reason);
-      setAllDeals([]);
-      nextErrors.deals = message;
-      toast.error(message);
-    }
-
-    if (relationshipsRes.status === 'fulfilled') {
-      setRelationships(relationshipsRes.value.relationships);
-    } else {
-      const message = getErrorMessage(relationshipsRes.reason, 'Relationships data could not be loaded');
-      console.error('[DealsPage] failed to load relationships', relationshipsRes.reason);
-      setRelationships([]);
-      nextErrors.relationships = message;
-      toast.error(message);
-    }
-
-    setLoadErrors(nextErrors);
-    setLoading(false);
-  }, [t]);
-
-  useEffect(() => { reload(); }, [reload]);
-
-  const openEdit = (deal: MerchantDeal) => {
-    setEditingDeal(deal);
-    setEditTitle(deal.title || '');
-    setEditAmount(String(deal.amount || 0));
-    setEditStatus(deal.status || 'pending');
-    setEditNote(String((deal.metadata as any)?.note || ''));
-  };
-
-  const saveEdit = async () => {
-    if (!editingDeal) return;
-    const amount = Number(editAmount);
-    if (!(amount > 0)) { toast.error(t('fixFields') + ' ' + t('dealAmountLabel')); return; }
+  const loadData = async () => {
     try {
-      const existingMeta = (editingDeal.metadata || {}) as Record<string, unknown>;
-      await dealsApi.update(editingDeal.id, {
-        title: editTitle,
-        amount,
-        status: editStatus as any,
-        metadata: { ...existingMeta, note: editNote },
-      });
-      await reload();
-      setEditingDeal(null);
-      toast.success(t('saveCorrection'));
-    } catch (err: any) { toast.error(err.message); }
+      const [templatesRes, agreementsRes] = await Promise.all([
+        agreementTemplates.list(),
+        merchantAgreements.list(),
+      ]);
+      setTemplates(templatesRes.templates);
+      setAgreements(agreementsRes.agreements);
+      setUsingDemo(false);
+    } catch (error) {
+      console.warn('[AgreementsPage] falling back to demo data', error);
+      setTemplates(demoTradingData.templates);
+      setAgreements(demoTradingData.merchantAgreements);
+      setUsingDemo(true);
+    }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteDealId) return;
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const approvedCountByMerchant = useMemo(() => {
+    const counts = new Map<string, number>();
+    agreements.filter((agreement) => agreement.status === 'approved').forEach((agreement) => {
+      counts.set(agreement.merchantId, (counts.get(agreement.merchantId) ?? 0) + 1);
+    });
+    return counts;
+  }, [agreements]);
+
+  const openTemplateEditor = (template?: AgreementTemplate) => {
+    setEditingTemplate(template ?? null);
+    setTemplateForm(template ? {
+      name: template.name,
+      agreementType: template.agreementType,
+      calculationMethod: template.calculationMethod,
+      value: String(template.calculationConfig.profitSharePercent ?? template.calculationConfig.fixedMarginAmount ?? template.calculationConfig.spreadPercent ?? template.calculationConfig.commissionPercent ?? 0),
+      defaultCurrency: template.defaultCurrency,
+      notes: template.notes,
+    } : defaultTemplateForm);
+    setTemplateDialog(true);
+  };
+
+  const openAgreementEditor = (agreement?: MerchantAgreement) => {
+    setEditingAgreement(agreement ?? null);
+    setAgreementForm(agreement ? {
+      templateId: agreement.templateId,
+      merchantId: agreement.merchantId,
+      merchantName: agreement.merchantName,
+      title: agreement.title,
+    } : defaultAgreementForm);
+    setAgreementDialog(true);
+  };
+
+  const saveTemplate = async () => {
+    const calculationConfig = configFromForm(templateForm.agreementType, templateForm.value);
     try {
-      await dealsApi.deletePermanent(deleteDealId);
-      await reload();
-      setDeleteDealId(null);
-      setEditingDeal(null);
-      toast.success(t('deletedSuccessfully'));
-    } catch (err: any) {
-      if (err?.status === 409) {
-        toast.error('This deal can no longer be deleted because related approvals or settlement records already exist.');
-        return;
+      if (editingTemplate) {
+        const nextConfig = calculationConfig;
+        const usedTemplate = agreements.some((agreement) => agreement.templateId === editingTemplate.id);
+        if (usedTemplate && economicTermsChanged(editingTemplate.calculationConfig, nextConfig)) {
+          toast.success('Economic term changes create a new version in the rebuilt model.');
+        }
+        if (!usingDemo) {
+          const response = await agreementTemplates.update(editingTemplate.id, {
+            name: templateForm.name,
+            agreementType: templateForm.agreementType,
+            calculationMethod: templateForm.calculationMethod,
+            calculationConfig: nextConfig,
+            defaultCurrency: templateForm.defaultCurrency,
+            notes: templateForm.notes,
+          });
+          setTemplates((current) => current.map((template) => template.id === editingTemplate.id ? response.template : template));
+        } else {
+          setTemplates((current) => current.map((template) => template.id === editingTemplate.id ? { ...template, name: templateForm.name, calculationConfig: nextConfig, updatedAt: new Date().toISOString() } : template));
+        }
+      } else if (!usingDemo) {
+        const response = await agreementTemplates.create({
+          name: templateForm.name,
+          agreementType: templateForm.agreementType,
+          calculationMethod: templateForm.calculationMethod,
+          calculationConfig,
+          defaultCurrency: templateForm.defaultCurrency,
+          notes: templateForm.notes,
+        });
+        setTemplates((current) => [response.template, ...current]);
+      } else {
+        setTemplates((current) => [{
+          id: `demo-template-${Date.now()}`,
+          name: templateForm.name,
+          agreementType: templateForm.agreementType,
+          calculationMethod: templateForm.calculationMethod,
+          calculationConfig,
+          defaultCurrency: templateForm.defaultCurrency,
+          notes: templateForm.notes,
+          createdByUserId: 'demo-user',
+          version: 1,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, ...current]);
       }
-      toast.error(err.message);
+      toast.success(editingTemplate ? 'Template updated.' : 'Template created.');
+      setTemplateDialog(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : 'Failed to save template');
     }
+  };
+
+  const saveAgreement = async () => {
+    try {
+      if (editingAgreement) {
+        toast.success('Approved used agreements are versioned on economic term changes; metadata stays easy to edit.');
+        setAgreements((current) => current.map((agreement) => agreement.id === editingAgreement.id ? { ...agreement, title: agreementForm.title, merchantName: agreementForm.merchantName, updatedAt: new Date().toISOString() } : agreement));
+      } else if (!usingDemo) {
+        const response = await merchantAgreements.create(agreementForm);
+        setAgreements((current) => [response.agreement, ...current]);
+      } else {
+        const template = templates.find((item) => item.id === agreementForm.templateId);
+        if (!template) {
+          toast.error('Select a template first.');
+          return;
+        }
+        setAgreements((current) => [{
+          id: `demo-agreement-${Date.now()}`,
+          templateId: template.id,
+          merchantId: agreementForm.merchantId,
+          merchantName: agreementForm.merchantName,
+          agreementType: template.agreementType,
+          title: agreementForm.title,
+          status: 'pending',
+          approvedByUserId: null,
+          approvedAt: null,
+          resolvedTermsSnapshot: {
+            agreementId: `demo-agreement-${Date.now()}`,
+            templateId: template.id,
+            version: 1,
+            agreementType: template.agreementType,
+            ...template.calculationConfig,
+          },
+          version: 1,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, ...current]);
+      }
+      toast.success(editingAgreement ? 'Merchant agreement updated.' : 'Merchant agreement created.');
+      setAgreementDialog(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : 'Failed to save merchant agreement');
+    }
+  };
+
+  const reviewAgreement = async (agreement: MerchantAgreement, action: 'approve' | 'reject') => {
+    try {
+      if (!usingDemo) {
+        const response = action === 'approve'
+          ? await merchantAgreements.approve(agreement.id)
+          : await merchantAgreements.reject(agreement.id);
+        setAgreements((current) => current.map((item) => item.id === agreement.id ? response.agreement : item));
+      } else {
+        setAgreements((current) => current.map((item) => item.id === agreement.id ? { ...item, status: action === 'approve' ? 'approved' : 'rejected', approvedAt: action === 'approve' ? new Date().toISOString() : null } : item));
+      }
+      toast.success(`Agreement ${action}d.`);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : `Failed to ${action} agreement`);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    if (confirmDelete.kind === 'template') {
+      const isUsed = agreements.some((agreement) => agreement.templateId === confirmDelete.id);
+      if (isUsed) {
+        setTemplates((current) => current.map((template) => template.id === confirmDelete.id ? { ...template, isActive: false, updatedAt: new Date().toISOString() } : template));
+        toast.success('Used template archived instead of deleted.');
+      } else {
+        setTemplates((current) => current.filter((template) => template.id !== confirmDelete.id));
+        toast.success('Unused template deleted.');
+      }
+    } else {
+      const isUsed = demoTradingData.orders.some((order) => order.merchantAgreementId === confirmDelete.id);
+      if (isUsed) {
+        setAgreements((current) => current.map((agreement) => agreement.id === confirmDelete.id ? { ...agreement, status: 'archived', isActive: false } : agreement));
+        toast.success('Used merchant agreement archived instead of deleted.');
+      } else {
+        setAgreements((current) => current.filter((agreement) => agreement.id !== confirmDelete.id));
+        toast.success('Unused merchant agreement deleted.');
+      }
+    }
+    setConfirmDelete(null);
   };
 
   return (
-    <div className="app-page-shell" dir={t.isRTL ? 'rtl' : 'ltr'}>
+    <div className="app-page-shell">
       <div className="app-page-content space-y-4">
-        <PageHeader title={t('dealsLabel')} description={t('allDealsAcross')} />
-        <div>
-        {loadErrors.deals && (
-          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            Deals data could not be loaded. {loadErrors.deals}
-          </div>
-        )}
-        {loadErrors.relationships && (
-          <div className="mb-3 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning">
-            Relationships data could not be loaded. Merchant labels may be unavailable.
-          </div>
-        )}
-        {allDeals.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p>{t('noDeals')}</p>
-            <p className="text-xs mt-1">{t('createDealsFromWorkspace')}</p>
-          </div>
-        )}
+        <PageHeader title="Agreements" description="Templates define reusable formulas, merchant agreements define approved merchant-specific terms.">
+          <Button variant="outline" onClick={() => openTemplateEditor()}>New template</Button>
+          <Button onClick={() => openAgreementEditor()}>New merchant agreement</Button>
+        </PageHeader>
 
-        {allDeals.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/30">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('deal')}</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('status')}</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('merchant')}</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('due')}</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('dealAmountLabel')}</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">P&L</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allDeals.map(deal => {
-                  const relationship = relationships.find(rel => rel.id === deal.relationship_id);
-                  const isDealCreator = deal.created_by === userId;
-                  const { label: familyLabel, icon: familyIcon } = getAgreementFamilyLabel(deal.deal_type, t.lang);
-                  const { partnerPct } = getDealShares(deal);
-                  const isLegacy = !isSupportedDealType(deal.deal_type);
-                  const merchantName = relationship?.counterparty?.display_name || (loadErrors.relationships ? 'Relationship unavailable' : '—');
-                  const customerName = String((deal.metadata as any)?.customer_name || '');
-                  const deletable = canDeleteDeal(deal);
+        {usingDemo && <div className="rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm">API unavailable, showing rebuilt workflow with demo records.</div>}
 
-                  return (
-                    <tr key={deal.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span>{familyIcon}</span>
-                          <div>
-                            <p className="font-medium text-sm">{deal.title || familyLabel}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {familyLabel}
-                              {customerName && ` · ${customerName}`}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge className={`text-xs ${statusColors[deal.status] || statusColors.pending}`}>{deal.status}</Badge>
-                        {isLegacy && <Badge variant="secondary" className="text-xs ml-1">{t('legacyAgreement')}</Badge>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
-                            {merchantName.charAt(0).toUpperCase()}
-                          </div>
-                          <span className="text-sm">{merchantName}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {deal.issue_date && <span>{deal.issue_date}</span>}
-                        {deal.due_date && <span className="ml-1">→ {deal.due_date}</span>}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <p className="font-bold">${deal.amount.toLocaleString()}</p>
-                        <p className="text-xs text-muted-foreground">{deal.currency}</p>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {deal.realized_pnl != null ? (
-                          <span className={`font-bold ${deal.realized_pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                            {deal.realized_pnl >= 0 ? '+' : ''}${deal.realized_pnl.toLocaleString()}
-                          </span>
-                        ) : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => openEdit(deal)}
-                            className="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-background hover:bg-muted transition-colors"
-                          >
-                            {t('edit')}
-                          </button>
-                          {deletable ? (
-                            <button
-                              onClick={() => setDeleteDealId(deal.id)}
-                              className="px-3 py-1.5 text-xs font-medium rounded-md border border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10 transition-colors"
-                            >
-                              {t('delete')}
-                            </button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Locked</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card>
+            <CardHeader><CardTitle>Agreement templates</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {templates.map((template) => (
+                <div key={template.id} className="rounded-lg border p-4">
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{template.name}</div>
+                      <div className="text-sm text-muted-foreground">{template.agreementType} · v{template.version}</div>
+                    </div>
+                    <Badge variant={template.isActive ? 'secondary' : 'outline'}>{template.isActive ? 'active' : 'archived'}</Badge>
+                  </div>
+                  <div className="mb-3 text-sm text-muted-foreground">{template.notes || 'No notes'}</div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => openTemplateEditor(template)}>Edit</Button>
+                    <Button variant="destructive" size="sm" onClick={() => setConfirmDelete({ kind: 'template', id: template.id })}>Delete</Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Merchant agreements</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {agreements.map((agreement) => (
+                <div key={agreement.id} className="rounded-lg border p-4">
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{agreement.title}</div>
+                      <div className="text-sm text-muted-foreground">{agreement.merchantName} · {agreement.agreementType} · v{agreement.version}</div>
+                    </div>
+                    <Badge variant={agreement.status === 'approved' ? 'secondary' : agreement.status === 'rejected' ? 'destructive' : 'outline'}>{agreement.status}</Badge>
+                  </div>
+                  <div className="mb-3 text-xs text-muted-foreground">Approved agreements available for this merchant: {approvedCountByMerchant.get(agreement.merchantId) ?? 0}</div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => openAgreementEditor(agreement)}>Edit</Button>
+                    {agreement.status === 'pending' && <Button size="sm" onClick={() => reviewAgreement(agreement, 'approve')}>Approve</Button>}
+                    {agreement.status === 'pending' && <Button variant="secondary" size="sm" onClick={() => reviewAgreement(agreement, 'reject')}>Reject</Button>}
+                    <Button variant="destructive" size="sm" onClick={() => setConfirmDelete({ kind: 'agreement', id: agreement.id })}>Delete</Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </div>
       </div>
 
-      {/* ─── EDIT DEAL DIALOG ─── */}
-      <Dialog open={!!editingDeal} onOpenChange={open => !open && setEditingDeal(null)}>
-        <DialogContent className="sm:max-w-[500px]">
+      <Dialog open={templateDialog} onOpenChange={setTemplateDialog}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-base font-bold">{t('correctTradeTitle')}</DialogTitle>
-            <DialogDescription>
-              Review the current agreement details and update the status using the strict pending/approved workflow.
-            </DialogDescription>
+            <DialogTitle>{editingTemplate ? 'Edit template' : 'Create template'}</DialogTitle>
+            <DialogDescription>Economic term edits are version-safe; used templates archive instead of breaking references.</DialogDescription>
           </DialogHeader>
-
-          <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
-            {t('editInPlaceWarning')}
+          <div className="space-y-3">
+            <Field label="Name"><Input value={templateForm.name} onChange={(event) => setTemplateForm((current) => ({ ...current, name: event.target.value }))} /></Field>
+            <Field label="Agreement type">
+              <Select value={templateForm.agreementType} onValueChange={(value) => setTemplateForm((current) => ({ ...current, agreementType: value as AgreementTemplate['agreementType'], calculationMethod: value as AgreementTemplate['calculationMethod'] }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="profit_share">Profit Share</SelectItem>
+                  <SelectItem value="fixed_margin">Fixed Margin</SelectItem>
+                  <SelectItem value="spread">Spread</SelectItem>
+                  <SelectItem value="commission">Commission</SelectItem>
+                  <SelectItem value="custom">Custom</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Calculation value"><Input value={templateForm.value} onChange={(event) => setTemplateForm((current) => ({ ...current, value: event.target.value }))} /></Field>
+            <Field label="Currency"><Input value={templateForm.defaultCurrency} onChange={(event) => setTemplateForm((current) => ({ ...current, defaultCurrency: event.target.value.toUpperCase() }))} /></Field>
+            <Field label="Notes"><Textarea value={templateForm.notes} onChange={(event) => setTemplateForm((current) => ({ ...current, notes: event.target.value }))} /></Field>
           </div>
-
-          {editingDeal && (
-            <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
-              <div className="text-[10px] font-extrabold uppercase tracking-wider text-primary mb-2">{t('currentStatsLabel')}</div>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-sm">{t('dealAmountLabel')}</span>
-                <strong className="font-mono text-sm">${editingDeal.amount.toLocaleString()}</strong>
-              </div>
-              {editingDeal.realized_pnl != null && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">P&L</span>
-                  <strong className={`font-mono text-sm ${editingDeal.realized_pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    {editingDeal.realized_pnl >= 0 ? '+' : ''}${editingDeal.realized_pnl.toLocaleString()}
-                  </strong>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="space-y-3 mt-2">
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('dealTitleLabel')}</label>
-              <input
-                value={editTitle}
-                onChange={e => setEditTitle(e.target.value)}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('dealAmountLabel')}</label>
-                <input
-                  inputMode="decimal"
-                  value={editAmount}
-                  onChange={e => setEditAmount(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('status')}</label>
-                <select
-                  value={editStatus}
-                  onChange={e => setEditStatus(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  {[editingDeal?.status, ...getAllowedDealStatusTransitions((editingDeal?.status || 'pending') as any)]
-                    .filter((status, index, arr): status is string => Boolean(status) && arr.indexOf(status) === index)
-                    .map(status => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('note')}</label>
-              <textarea
-                value={editNote}
-                onChange={e => setEditNote(e.target.value)}
-                rows={2}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="mt-4 flex-row justify-between items-center">
-            {editingDeal && canDeleteDeal(editingDeal) ? (
-              <button
-                onClick={() => setDeleteDealId(editingDeal.id)}
-                className="px-3 py-2 rounded-md border border-destructive/30 bg-destructive/5 text-destructive text-xs font-semibold hover:bg-destructive/10 transition-colors"
-              >
-                {t('delete')}
-              </button>
-            ) : (
-              <span className="text-xs text-muted-foreground">Deletion is available only while the deal is still pending and untouched.</span>
-            )}
-            <div className="flex gap-2 ml-auto">
-              <button
-                onClick={() => setEditingDeal(null)}
-                className="px-4 py-2 rounded-md border border-input bg-background text-sm hover:bg-muted transition-colors"
-              >
-                {t('cancel')}
-              </button>
-              <button
-                onClick={saveEdit}
-                className="px-4 py-2 rounded-md bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors"
-              >
-                {t('saveCorrection')}
-              </button>
-            </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateDialog(false)}>Cancel</Button>
+            <Button onClick={saveTemplate}>Save template</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ─── DELETE CONFIRMATION DIALOG ─── */}
-      <Dialog open={!!deleteDealId} onOpenChange={open => !open && setDeleteDealId(null)}>
-        <DialogContent className="sm:max-w-[420px]">
+      <Dialog open={agreementDialog} onOpenChange={setAgreementDialog}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-base font-bold">{t('confirmDeleteDeal')}</DialogTitle>
-            <DialogDescription>
-              This permanently removes the pending deal record if no linked approvals, settlement entries, or profit records exist.
-            </DialogDescription>
+            <DialogTitle>{editingAgreement ? 'Edit merchant agreement' : 'Create merchant agreement'}</DialogTitle>
+            <DialogDescription>Merchant approval happens once per merchant agreement version, not once per order.</DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            {t('deleteDealWarning')}
+          <div className="space-y-3">
+            <Field label="Template">
+              <Select value={agreementForm.templateId} onValueChange={(value) => setAgreementForm((current) => ({ ...current, templateId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
+                <SelectContent>{templates.map((template) => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </Field>
+            <Field label="Merchant ID"><Input value={agreementForm.merchantId} onChange={(event) => setAgreementForm((current) => ({ ...current, merchantId: event.target.value }))} /></Field>
+            <Field label="Merchant name"><Input value={agreementForm.merchantName} onChange={(event) => setAgreementForm((current) => ({ ...current, merchantName: event.target.value }))} /></Field>
+            <Field label="Title"><Input value={agreementForm.title} onChange={(event) => setAgreementForm((current) => ({ ...current, title: event.target.value }))} /></Field>
           </div>
-          <DialogFooter className="mt-4 flex-row justify-end gap-2">
-            <button
-              onClick={() => setDeleteDealId(null)}
-              className="px-4 py-2 rounded-md border border-input bg-background text-sm hover:bg-muted transition-colors"
-            >
-              {t('cancel')}
-            </button>
-            <button
-              onClick={confirmDelete}
-              className="px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors"
-            >
-              {t('delete')}
-            </button>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAgreementDialog(false)}>Cancel</Button>
+            <Button onClick={saveAgreement}>Save agreement</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!confirmDelete} onOpenChange={(open) => !open && setConfirmDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm delete</DialogTitle>
+            <DialogDescription>If the record is already in use, the rebuilt workflow archives it instead of breaking history.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete}>Delete</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
 }
