@@ -78,7 +78,6 @@ type SessionRow = {
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-const SESSION_COOKIE_NAME = '__Host-session';
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const LOCAL_DEV_ORIGINS = new Set([
   'http://localhost:3000',
@@ -149,8 +148,9 @@ function requestIsSecure(c: Context<{ Bindings: Bindings }>): boolean {
 }
 
 function sessionCookie(value: string, secure: boolean, maxAge: number): string {
+  const cookieName = secure ? '__Host-session' : 'tracker_session';
   const parts = [
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(value)}`,
+    `${cookieName}=${encodeURIComponent(value)}`,
     'HttpOnly',
     'Path=/',
     `Max-Age=${maxAge}`,
@@ -318,7 +318,8 @@ app.use('*', async (c, next) => {
 });
 
 async function sessionForRequest(c: Context<{ Bindings: Bindings }>) {
-  const cookieToken = parseCookie(c.req.header('Cookie'), SESSION_COOKIE_NAME);
+  const cookieName = requestIsSecure(c) ? '__Host-session' : 'tracker_session';
+  const cookieToken = parseCookie(c.req.header('Cookie'), cookieName);
   if (!cookieToken) return null;
 
   const tokenHash = await sha256Hex(cookieToken);
