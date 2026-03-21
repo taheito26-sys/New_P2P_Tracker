@@ -13,8 +13,24 @@ const LIVE_BACKOFF_MS = 250;
 const BINANCE_P2P_URL = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
 const BINANCE_TIMEOUT_MS = 12_000;
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
+const MEMORY_CACHE_TTL_MS = 5_000;
+const PEER_FAILURE_QUARANTINE_MS = 30_000;
+const PEER_FAILURE_THRESHOLD = 3;
 
 type BinanceOffer = P2PSnapshot['sellOffers'][number];
+type CacheEntry = { snapshot: P2PSnapshot; cachedAt: number; invalidationVersion: number };
+type SyncMeta = {
+  version: number;
+  lamport: number;
+  invalidationVersion: number;
+  lastUpdatedAt: string;
+  lastReplicationAt: string;
+  peerSource: string;
+  consecutiveFailures: number;
+  quarantineUntil: string | null;
+};
+
+const memorySnapshotCache = new Map<P2PMarket, CacheEntry>();
 
 interface SideResult {
   avg: number | null;
@@ -29,6 +45,28 @@ function kvKey(market: P2PMarket, kind: 'latest' | 'history'): string {
 
 function legacyKvKey(kind: 'latest' | 'history'): string {
   return `p2p:${kind}`;
+}
+
+function syncMetaKey(market: P2PMarket): string {
+  return `p2p:${market}:sync`;
+}
+
+function peerSource(env: ProviderEnv) {
+  return env.P2P_LIVE_PROVIDER_URL || `local:${env.APP_ENV || 'dev'}`;
+}
+
+function initialSyncMeta(env: ProviderEnv): SyncMeta {
+  const now = new Date().toISOString();
+  return {
+    version: 0,
+    lamport: 0,
+    invalidationVersion: 0,
+    lastUpdatedAt: now,
+    lastReplicationAt: now,
+    peerSource: peerSource(env),
+    consecutiveFailures: 0,
+    quarantineUntil: null,
+  };
 }
 
 function toHistoryPoint(snapshot: P2PSnapshot): P2PHistoryPoint {
@@ -46,15 +84,25 @@ function toHistoryPoint(snapshot: P2PSnapshot): P2PHistoryPoint {
   };
 }
 
+function cloneSnapshot(snapshot: P2PSnapshot, overrides: Partial<P2PSnapshot> = {}): P2PSnapshot {
+  return { ...snapshot, ...overrides };
+}
+
 function createUnavailableSnapshot(market: P2PMarket, reason: string, retryCount = 0): P2PSnapshot {
   return {
     ts: Date.now(),
     market,
     source: 'unavailable',
+    servedFrom: 'live_fetch',
+    peerSource: 'unavailable',
     fetchedAt: new Date().toISOString(),
     stale: false,
     status: 'unavailable',
     unavailableReason: reason,
+    version: 0,
+    lamport: 0,
+    cacheAgeMs: 0,
+    replicationLagMs: 0,
     latencyMs: 0,
     retryCount,
     sellAvg: null,
@@ -84,10 +132,16 @@ function normalizeSnapshotRecord(raw: Record<string, unknown>, market: P2PMarket
     ts,
     market,
     source: 'live',
+    servedFrom: typeof raw.servedFrom === 'string' ? raw.servedFrom as P2PSnapshot['servedFrom'] : 'kv',
+    peerSource: typeof raw.peerSource === 'string' ? raw.peerSource : 'kv',
     fetchedAt: new Date(ts).toISOString(),
     stale,
     status: stale ? 'degraded' : 'ok',
     unavailableReason: null,
+    version: typeof raw.version === 'number' ? raw.version : 0,
+    lamport: typeof raw.lamport === 'number' ? raw.lamport : 0,
+    cacheAgeMs: typeof raw.cacheAgeMs === 'number' ? raw.cacheAgeMs : ageMs,
+    replicationLagMs: typeof raw.replicationLagMs === 'number' ? raw.replicationLagMs : 0,
     sellAvg: typeof raw.sellAvg === 'number' ? raw.sellAvg : null,
     buyAvg: typeof raw.buyAvg === 'number' ? raw.buyAvg : null,
     bestSell: typeof raw.bestSell === 'number' ? raw.bestSell : null,
@@ -141,16 +195,111 @@ async function getSnapshotFromKV(env: ProviderEnv, market: P2PMarket): Promise<P
   return normalizeSnapshotRecord(raw, market);
 }
 
+async function getSyncMeta(env: ProviderEnv, market: P2PMarket): Promise<SyncMeta> {
+  const raw = await env.P2P_KV.get(syncMetaKey(market), 'json') as SyncMeta | null;
+  return raw && typeof raw === 'object' ? raw : initialSyncMeta(env);
+}
+
+async function putSyncMeta(env: ProviderEnv, market: P2PMarket, meta: SyncMeta): Promise<void> {
+  await env.P2P_KV.put(syncMetaKey(market), JSON.stringify(meta));
+}
+
+function invalidateMemoryCache(market: P2PMarket, invalidationVersion: number) {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return;
+  if (entry.invalidationVersion < invalidationVersion) {
+    memorySnapshotCache.delete(market);
+  }
+}
+
+async function getSnapshotFromMemoryCache(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return null;
+
+  const cacheAgeMs = Date.now() - entry.cachedAt;
+  const meta = await getSyncMeta(env, market);
+  if (cacheAgeMs > MEMORY_CACHE_TTL_MS || entry.invalidationVersion < meta.invalidationVersion) {
+    memorySnapshotCache.delete(market);
+    return null;
+  }
+
+  return cloneSnapshot(entry.snapshot, {
+    servedFrom: 'memory_cache',
+    cacheAgeMs,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+    version: meta.version,
+    lamport: meta.lamport,
+    peerSource: meta.peerSource,
+  });
+}
+
+function cacheSnapshot(snapshot: P2PSnapshot, invalidationVersion: number) {
+  memorySnapshotCache.set(snapshot.market, {
+    snapshot,
+    cachedAt: Date.now(),
+    invalidationVersion,
+  });
+}
+
+async function runAntiEntropyPull(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
+  const meta = await getSyncMeta(env, market);
+  const kvSnapshot = await getSnapshotFromKV(env, market);
+  if (!kvSnapshot) {
+    invalidateMemoryCache(market, meta.invalidationVersion);
+    return null;
+  }
+
+  const repairedSnapshot = cloneSnapshot(kvSnapshot, {
+    servedFrom: 'kv',
+    cacheAgeMs: Date.now() - kvSnapshot.ts,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+    version: meta.version,
+    lamport: meta.lamport,
+    peerSource: meta.peerSource,
+  });
+  invalidateMemoryCache(market, meta.invalidationVersion);
+  cacheSnapshot(repairedSnapshot, meta.invalidationVersion);
+  return repairedSnapshot;
+}
+
 async function persistSnapshot(env: ProviderEnv, snapshot: P2PSnapshot): Promise<P2PHistoryPoint[]> {
+  const meta = await getSyncMeta(env, snapshot.market);
   const existingHistory = await getHistoryFromKV(env, snapshot.market);
   const nextHistory = snapshot.source === 'live'
     ? [...existingHistory, toHistoryPoint(snapshot)].slice(-TRACKER_HISTORY_LIMIT)
     : existingHistory;
 
+  const version = meta.version + 1;
+  const lamport = Math.max(meta.lamport, version) + 1;
+  const lastReplicationAt = new Date().toISOString();
+  const persistedSnapshot = cloneSnapshot(snapshot, {
+    version,
+    lamport,
+    servedFrom: 'live_fetch',
+    peerSource: peerSource(env),
+    cacheAgeMs: 0,
+    replicationLagMs: 0,
+  });
+  const nextMeta: SyncMeta = {
+    version,
+    lamport,
+    invalidationVersion: meta.invalidationVersion + 1,
+    lastUpdatedAt: persistedSnapshot.fetchedAt,
+    lastReplicationAt,
+    peerSource: peerSource(env),
+    consecutiveFailures: 0,
+    quarantineUntil: null,
+  };
+
   await Promise.all([
-    env.P2P_KV.put(kvKey(snapshot.market, 'latest'), JSON.stringify(snapshot)),
+    env.P2P_KV.put(kvKey(snapshot.market, 'latest'), JSON.stringify(persistedSnapshot)),
     env.P2P_KV.put(kvKey(snapshot.market, 'history'), JSON.stringify(nextHistory)),
+    putSyncMeta(env, snapshot.market, nextMeta),
   ]);
+
+  invalidateMemoryCache(snapshot.market, nextMeta.invalidationVersion);
+  cacheSnapshot(persistedSnapshot, nextMeta.invalidationVersion);
+  console.info(`[p2p.sync] push market=${snapshot.market} version=${version} lamport=${lamport} peer=${nextMeta.peerSource}`);
 
   return nextHistory;
 }
@@ -158,8 +307,11 @@ async function persistSnapshot(env: ProviderEnv, snapshot: P2PSnapshot): Promise
 function staleSnapshot(snapshot: P2PSnapshot, retryCount: number): P2PSnapshot {
   return {
     ...snapshot,
+    servedFrom: 'stale_cache',
     stale: true,
     status: 'degraded',
+    cacheAgeMs: Date.now() - snapshot.ts,
+    replicationLagMs: Date.now() - snapshot.ts,
     retryCount,
   };
 }
@@ -244,10 +396,16 @@ async function fetchLiveSnapshot(market: P2PMarket, _env: ProviderEnv): Promise<
         ts,
         market,
         source: 'live',
+        servedFrom: 'live_fetch',
+        peerSource: peerSource(_env),
         fetchedAt: new Date(ts).toISOString(),
         stale: false,
         status: 'ok',
         unavailableReason: null,
+        version: 0,
+        lamport: 0,
+        cacheAgeMs: 0,
+        replicationLagMs: 0,
         latencyMs: Date.now() - startedAt,
         retryCount: attempt,
         sellAvg: sellSide.avg,
@@ -271,6 +429,11 @@ async function fetchLiveSnapshot(market: P2PMarket, _env: ProviderEnv): Promise<
 
 export async function refreshP2PMarketSnapshot(marketInput: string, env: ProviderEnv): Promise<{ snapshot: P2PSnapshot; history: P2PHistoryPoint[] }> {
   const market = normalizeMarketId(marketInput);
+  const meta = await getSyncMeta(env, market);
+  if (meta.quarantineUntil && new Date(meta.quarantineUntil).getTime() > Date.now()) {
+    throw new Error(`upstream_quarantined_until:${meta.quarantineUntil}`);
+  }
+
   const snapshot = await fetchLiveSnapshot(market, env);
   const history = await persistSnapshot(env, snapshot);
   return { snapshot, history };
@@ -278,8 +441,23 @@ export async function refreshP2PMarketSnapshot(marketInput: string, env: Provide
 
 export async function getP2PSnapshot(marketInput: string | undefined, env: ProviderEnv): Promise<P2PSnapshot> {
   const market = normalizeMarketId(marketInput);
+  await runAntiEntropyPull(env, market);
+  const memoryCached = await getSnapshotFromMemoryCache(env, market);
+  if (memoryCached) return memoryCached;
   const cached = await getSnapshotFromKV(env, market);
-  if (cached) return cached;
+  if (cached) {
+    const meta = await getSyncMeta(env, market);
+    const fromKv = cloneSnapshot(cached, {
+      servedFrom: 'kv',
+      cacheAgeMs: Date.now() - cached.ts,
+      replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+      version: meta.version,
+      lamport: meta.lamport,
+      peerSource: meta.peerSource,
+    });
+    cacheSnapshot(fromKv, meta.invalidationVersion);
+    return fromKv;
+  }
   const { snapshot } = await refreshP2PMarketSnapshot(market, env);
   return snapshot;
 }
@@ -294,15 +472,41 @@ export async function getP2PHistory(marketInput: string | undefined, env: Provid
 
 export async function getP2PSnapshotWithFallback(marketInput: string | undefined, env: ProviderEnv): Promise<P2PSnapshot> {
   const market = normalizeMarketId(marketInput);
+  await runAntiEntropyPull(env, market);
+  const memoryCached = await getSnapshotFromMemoryCache(env, market);
+  if (memoryCached && memoryCached.source === 'live' && !memoryCached.stale) {
+    return memoryCached;
+  }
+
   const cached = await getSnapshotFromKV(env, market);
   if (cached && cached.source === 'live' && !cached.stale) {
-    return cached;
+    const meta = await getSyncMeta(env, market);
+    const fromKv = cloneSnapshot(cached, {
+      servedFrom: 'kv',
+      cacheAgeMs: Date.now() - cached.ts,
+      replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+      version: meta.version,
+      lamport: meta.lamport,
+      peerSource: meta.peerSource,
+    });
+    cacheSnapshot(fromKv, meta.invalidationVersion);
+    return fromKv;
   }
 
   try {
     const { snapshot } = await refreshP2PMarketSnapshot(market, env);
     return snapshot;
   } catch (error) {
+    const meta = await getSyncMeta(env, market);
+    const failures = meta.consecutiveFailures + 1;
+    const quarantineUntil = failures >= PEER_FAILURE_THRESHOLD
+      ? new Date(Date.now() + PEER_FAILURE_QUARANTINE_MS).toISOString()
+      : null;
+    await putSyncMeta(env, market, {
+      ...meta,
+      consecutiveFailures: failures,
+      quarantineUntil,
+    });
     if (cached && cached.source === 'live') {
       return staleSnapshot(cached, LIVE_MAX_RETRIES);
     }
@@ -317,6 +521,7 @@ export async function getP2PSnapshotWithFallback(marketInput: string | undefined
 export async function scheduledRefreshAllMarkets(env: ProviderEnv, log: Pick<Console, 'info' | 'error'> = console): Promise<void> {
   await Promise.all(P2P_MARKETS.map(async (market) => {
     try {
+      await runAntiEntropyPull(env, market);
       const { snapshot, history } = await refreshP2PMarketSnapshot(market, env);
       log.info(`[p2p] refreshed market=${market} source=${snapshot.source} history=${history.length} stale=${snapshot.stale}`);
     } catch (error) {
