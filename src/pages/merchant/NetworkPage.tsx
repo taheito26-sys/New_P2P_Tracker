@@ -30,6 +30,7 @@ export default function NetworkPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [query, setQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [results, setResults] = useState<MerchantSearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -56,7 +57,6 @@ export default function NetworkPage() {
     setLoading(true);
     const [invitesRes, sentInvitesRes, relationshipsRes, approvalsInboxRes, approvalsSentRes] = await Promise.allSettled([
       api.invites.inbox(),
-      api.invites.sent(),
       api.relationships.list(),
       api.approvals.inbox(),
       api.approvals.sent(),
@@ -132,6 +132,7 @@ export default function NetworkPage() {
 
   const handleSendInvite = async () => {
     if (!inviteTarget) return;
+
     try {
       await api.invites.send({
         to_merchant_id: inviteTarget.merchant_id,
