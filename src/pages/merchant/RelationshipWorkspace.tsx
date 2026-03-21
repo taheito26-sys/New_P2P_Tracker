@@ -480,6 +480,15 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
                           <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(outstanding.outstanding)}</p>
                         </div>
+                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('price')}</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">{price != null ? `$${price.toLocaleString()}` : 'Not set'}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(outstanding.outstanding)}</p>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
                       </div>
 
                       <div className={`rounded-2xl border border-border/70 bg-muted/20 ${embedded ? 'p-3' : 'p-4'}`}>
