@@ -292,6 +292,7 @@ export default function NetworkPage() {
       .filter((item): item is ConversationSummary => Boolean(item)),
     [conversationMap, relationships],
   );
+  const selectedConversation = selectedRelationship ? conversationMap[selectedRelationship.id] ?? null : null;
   const singleRelationshipMode = relationships.length === 1;
   const totalPendingActions = inbox.filter((invite) => invite.status === 'pending').length + conversationList.reduce((sum, item) => sum + item.pendingIncomingApprovals + item.pendingOutgoingApprovals, 0);
 
@@ -318,7 +319,7 @@ export default function NetworkPage() {
             <p className="text-sm text-muted-foreground">
               {singleRelationshipMode
                 ? 'One relationship detected — the full merchant workspace is embedded below.'
-                : 'Select a relationship to work deals, approvals, and messages without leaving Network.'}
+                : 'Focus on deal approvals, live agreement details, and the active merchant workspace from one screen.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -327,46 +328,97 @@ export default function NetworkPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)]">
-          <div className="space-y-4">
-            <div id="merchant-search" className="rounded-2xl border border-border/70 bg-background p-3">
-              <p className="mb-2 text-sm font-semibold text-foreground">Find merchants</p>
-              <form onSubmit={handleSearch} className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search merchants" className="pl-9" />
+        <div className="mt-4 rounded-2xl border border-border/70 bg-background/70 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Deal & approval focus</p>
+              <p className="text-xs text-muted-foreground">Keep merchant discovery lightweight and keep most of your attention on the active relationship workspace.</p>
+            </div>
+            <form id="merchant-search" onSubmit={handleSearch} className="flex w-full max-w-md gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find merchant…" className="h-9 pl-9" />
+              </div>
+              <Button type="submit" size="sm">Search</Button>
+            </form>
+          </div>
+          {searchOpen && (
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {results.length === 0 && searched ? <p className="text-sm text-muted-foreground">No merchants found.</p> : null}
+              {results.map((result) => (
+                <div key={result.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-card px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{result.display_name}</p>
+                    <p className="text-xs text-muted-foreground">{result.merchant_id} · {result.region || 'Region not set'}</p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => openInviteDialog(result)} className="gap-1.5">
+                    <UserPlus className="h-3.5 w-3.5" />
+                    {t('invite')}
+                  </Button>
                 </div>
-                <Button type="submit">Search</Button>
-              </form>
-              {searchOpen && (
-                <div className="mt-3 space-y-2">
-                  {results.length === 0 && searched ? <p className="text-sm text-muted-foreground">No merchants found.</p> : null}
-                  {results.map((result) => (
-                    <div key={result.id} className="flex items-center justify-between rounded-xl border border-border/70 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{result.display_name}</p>
-                        <p className="text-xs text-muted-foreground">{result.merchant_id} · {result.region || 'Region not set'}</p>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={() => openInviteDialog(result)} className="gap-1.5">
-                        <UserPlus className="h-3.5 w-3.5" />
-                        {t('invite')}
-                      </Button>
-                    </div>
-                  ))}
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_340px]">
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-border/70 bg-background p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Incoming approvals</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{selectedConversation?.pendingIncomingApprovals ?? conversationList.reduce((sum, item) => sum + item.pendingIncomingApprovals, 0)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Deals waiting for your decision.</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Outgoing approvals</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{selectedConversation?.pendingOutgoingApprovals ?? conversationList.reduce((sum, item) => sum + item.pendingOutgoingApprovals, 0)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Deals you sent for review.</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Unread messages</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{selectedConversation?.unreadCount ?? conversationList.reduce((sum, item) => sum + item.unreadCount, 0)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Context attached to the active relationship.</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Pending invites</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{inbox.filter((invite) => invite.status === 'pending').length + sentInvites.filter((invite) => invite.status === 'pending').length}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Kept secondary to deals and approvals.</p>
+              </div>
+            </div>
+
+            <div>
+              {selectedRelationship ? (
+                <NetworkWorkspaceBoundary key={selectedRelationship.id}>
+                  <RelationshipWorkspace relationshipId={selectedRelationship.id} embedded />
+                </NetworkWorkspaceBoundary>
+              ) : (
+                <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-border bg-card text-sm text-muted-foreground">
+                  Select a relationship to open its workspace.
                 </div>
               )}
             </div>
+          </div>
 
-            {!singleRelationshipMode && (
-              <div className="rounded-2xl border border-border/70 bg-background p-3">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">Relationship inbox</p>
-                    <p className="text-xs text-muted-foreground">Choose a merchant thread to open the integrated workspace.</p>
-                  </div>
-                  <Users className="h-4 w-4 text-muted-foreground" />
+          <aside className="space-y-4">
+            <div className="rounded-2xl border border-border/70 bg-background p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Approval overview</p>
+                  <p className="text-xs text-muted-foreground">Use this side panel to pick the relationship whose deals need attention.</p>
                 </div>
-                <div className="space-y-2">
+                <MessageCircle className="h-4 w-4 text-muted-foreground" />
+              </div>
+
+              {selectedConversation && selectedRelationship && (
+                <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Active relationship</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedRelationship.counterparty?.display_name || selectedRelationship.counterparty?.nickname || selectedRelationship.id}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{selectedConversation.latestMessage?.body || 'Open deal details and approvals in the workspace.'}</p>
+                </div>
+              )}
+
+              {!singleRelationshipMode && (
+                <div className="mt-3 space-y-2">
                   {conversationList.map((item) => {
                     const selected = selectedRelationship?.id === item.relationship.id;
                     return (
@@ -386,19 +438,26 @@ export default function NetworkPage() {
                             <p className="truncate text-xs text-muted-foreground">{item.latestMessage?.body || 'No messages yet'}</p>
                           </div>
                           <div className="shrink-0 text-right">
-                            {item.unreadCount > 0 && <Badge>{item.unreadCount} unread</Badge>}
-                            <p className="mt-1 text-[11px] text-muted-foreground">{item.pendingIncomingApprovals} in · {item.pendingOutgoingApprovals} out</p>
+                            <p className="text-xs font-medium text-foreground">{item.pendingIncomingApprovals + item.pendingOutgoingApprovals} approvals</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{item.unreadCount} unread</p>
                           </div>
                         </div>
                       </button>
                     );
                   })}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {(inbox.filter((invite) => invite.status === 'pending').length > 0 || sentInvites.filter((invite) => invite.status === 'pending').length > 0) && (
-              <div className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Invite queue</p>
+                    <p className="text-xs text-muted-foreground">Kept compact so the page stays centered on active deals.</p>
+                  </div>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </div>
                 {inbox.filter((invite) => invite.status === 'pending').length > 0 && (
                   <div>
                     <p className="text-sm font-semibold text-amber-900">Incoming invites</p>
@@ -417,9 +476,8 @@ export default function NetworkPage() {
                     </div>
                   </div>
                 )}
-
                 {sentInvites.filter((invite) => invite.status === 'pending').length > 0 && (
-                  <div>
+                  <div className="mt-3">
                     <p className="text-sm font-semibold text-amber-900">Sent invites</p>
                     <div className="mt-2 space-y-2">
                       {sentInvites.filter((invite) => invite.status === 'pending').map((invite) => (
@@ -441,19 +499,7 @@ export default function NetworkPage() {
                 )}
               </div>
             )}
-          </div>
-
-          <div>
-            {selectedRelationship ? (
-              <NetworkWorkspaceBoundary key={selectedRelationship.id}>
-                <RelationshipWorkspace relationshipId={selectedRelationship.id} embedded />
-              </NetworkWorkspaceBoundary>
-            ) : (
-              <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-border bg-card text-sm text-muted-foreground">
-                Select a relationship to open its workspace.
-              </div>
-            )}
-          </div>
+          </aside>
         </div>
       </section>
 
