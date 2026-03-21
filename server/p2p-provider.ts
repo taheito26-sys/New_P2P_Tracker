@@ -281,6 +281,73 @@ async function runAntiEntropyPull(env: ProviderEnv, market: P2PMarket): Promise<
   return repairedSnapshot;
 }
 
+async function getSyncMeta(env: ProviderEnv, market: P2PMarket): Promise<SyncMeta> {
+  const raw = await env.P2P_KV.get(syncMetaKey(market), 'json') as SyncMeta | null;
+  return raw && typeof raw === 'object' ? raw : initialSyncMeta(env);
+}
+
+async function putSyncMeta(env: ProviderEnv, market: P2PMarket, meta: SyncMeta): Promise<void> {
+  await env.P2P_KV.put(syncMetaKey(market), JSON.stringify(meta));
+}
+
+function invalidateMemoryCache(market: P2PMarket, invalidationVersion: number) {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return;
+  if (entry.invalidationVersion < invalidationVersion) {
+    memorySnapshotCache.delete(market);
+  }
+}
+
+async function getSnapshotFromMemoryCache(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return null;
+
+  const cacheAgeMs = Date.now() - entry.cachedAt;
+  const meta = await getSyncMeta(env, market);
+  if (cacheAgeMs > MEMORY_CACHE_TTL_MS || entry.invalidationVersion < meta.invalidationVersion) {
+    memorySnapshotCache.delete(market);
+    return null;
+  }
+
+  return cloneSnapshot(entry.snapshot, {
+    servedFrom: 'memory_cache',
+    cacheAgeMs,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+    version: meta.version,
+    lamport: meta.lamport,
+    peerSource: meta.peerSource,
+  });
+}
+
+function cacheSnapshot(snapshot: P2PSnapshot, invalidationVersion: number) {
+  memorySnapshotCache.set(snapshot.market, {
+    snapshot,
+    cachedAt: Date.now(),
+    invalidationVersion,
+  });
+}
+
+async function runAntiEntropyPull(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
+  const meta = await getSyncMeta(env, market);
+  const kvSnapshot = await getSnapshotFromKV(env, market);
+  if (!kvSnapshot) {
+    invalidateMemoryCache(market, meta.invalidationVersion);
+    return null;
+  }
+
+  const repairedSnapshot = cloneSnapshot(kvSnapshot, {
+    servedFrom: 'kv',
+    cacheAgeMs: Date.now() - kvSnapshot.ts,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+    version: meta.version,
+    lamport: meta.lamport,
+    peerSource: meta.peerSource,
+  });
+  invalidateMemoryCache(market, meta.invalidationVersion);
+  cacheSnapshot(repairedSnapshot, meta.invalidationVersion);
+  return repairedSnapshot;
+}
+
 async function persistSnapshot(env: ProviderEnv, snapshot: P2PSnapshot): Promise<P2PHistoryPoint[]> {
   const meta = await getSyncMeta(env, snapshot.market);
   const existingHistory = await getHistoryFromKV(env, snapshot.market);
