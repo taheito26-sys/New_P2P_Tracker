@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, Bell, Menu, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { Activity, Menu, Plus, Search, SlidersHorizontal, Users } from 'lucide-react';
 import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
@@ -77,6 +77,7 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
           </div>
 
           <div className="tracker-topbar-mobile-actions">
+            <ActivityCenter triggerLabel="Activity" className="max-w-[11rem] justify-between" />
             <button
               className={cn('tracker-icon-btn tracker-icon-btn--mobile-toggle', mobileControlsOpen && 'active')}
               type="button"
@@ -86,8 +87,8 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
               <SlidersHorizontal size={15} />
             </button>
             <span className="tracker-user-avatar">{(profile?.display_name || 'U').charAt(0).toUpperCase()}</span>
-            <button className="tracker-plus tracker-plus--mobile" type="button" onClick={() => navigate('/trading/orders')}>
-              <Plus size={16} />
+            <button className="tracker-plus tracker-plus--mobile" type="button" onClick={() => navigate('/network#merchant-search')}>
+              <Users size={16} />
             </button>
           </div>
         </div>
