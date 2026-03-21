@@ -27,7 +27,6 @@ export default function NetworkPage() {
   const { userId } = useAuth();
   const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [query, setQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement | null>(null);
