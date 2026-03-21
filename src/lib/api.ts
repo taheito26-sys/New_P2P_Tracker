@@ -198,12 +198,6 @@ export const approvals = {
     request<{ ok: boolean; approval: MerchantApproval }>(`/api/merchant/approvals/${id}/review`, { method: 'POST', body: JSON.stringify({ status, resolution_note }) }),
 };
 
-export const messages = {
-  list: (relationshipId: string) => request<{ messages: MerchantMessage[] }>(`/api/merchant/messages?relationship_id=${relationshipId}`),
-  send: (data: Partial<MerchantMessage>) => request<{ ok: boolean; message: MerchantMessage }>('/api/merchant/messages', { method: 'POST', body: JSON.stringify(data) }),
-  markRead: (id: string) => request<{ ok: boolean }>(`/api/merchant/messages/${id}/read`, { method: 'POST' }),
-};
-
 export const audit = {
   relationship: (relationshipId: string) =>
     request<{ logs: AuditLog[] }>(`/api/merchant/audit/relationship/${relationshipId}`),
