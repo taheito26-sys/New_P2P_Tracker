@@ -3,6 +3,7 @@ import { assertDealStatusTransition } from '../src/lib/merchant-deal-status';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { getP2PHistory, getP2PSnapshotWithFallback, normalizeMarketId, scheduledRefreshAllMarkets } from './p2p-provider';
+import { registerTradingRoutes } from './trading-routes';
 
 type Bindings = {
   DB: D1Database;
@@ -1632,6 +1633,8 @@ app.get('/api/analytics', requireAuth, async (c) => {
     riskIndicators,
   });
 });
+
+registerTradingRoutes(app, requireAuth);
 
 app.onError((error, c) => c.json({ error: error.message }, 500));
 
