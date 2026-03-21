@@ -211,7 +211,23 @@ export default function NetworkPage() {
   const handleSendInvite = async () => {
     if (!inviteTarget) return;
     try {
-      await api.invites.send({ to_merchant_id: inviteTarget.merchant_id, purpose: inviteForm.purpose || t('generalCollaboration'), requested_role: inviteForm.role, message: inviteForm.message });
+      const payload = {
+        to_merchant_id: inviteTarget.merchant_id,
+        purpose: inviteForm.purpose || t('generalCollaboration'),
+        requested_role: inviteForm.role,
+        message: inviteForm.message,
+      };
+      const sendInvite = typeof api.invites.send === 'function'
+        ? api.invites.send.bind(api.invites)
+        : typeof api.invites.create === 'function'
+          ? api.invites.create.bind(api.invites)
+          : null;
+
+      if (!sendInvite) {
+        throw new Error('Invite API client is out of sync. Missing invites.send/create');
+      }
+
+      await sendInvite(payload);
       toast.success(`${t('inviteSentTo')} ${inviteTarget.display_name}`);
       setInviteDialogOpen(false);
       await reload();
