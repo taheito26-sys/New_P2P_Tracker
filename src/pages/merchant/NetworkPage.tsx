@@ -23,10 +23,45 @@ type ConversationSummary = {
   pendingOutgoingApprovals: number;
 };
 
+type NetworkWorkspaceBoundaryProps = {
+  children: React.ReactNode;
+};
+
+type NetworkWorkspaceBoundaryState = {
+  hasError: boolean;
+};
+
+class NetworkWorkspaceBoundary extends React.Component<NetworkWorkspaceBoundaryProps, NetworkWorkspaceBoundaryState> {
+  constructor(props: NetworkWorkspaceBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('[NetworkPage] embedded workspace crashed', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-destructive/30 bg-destructive/5 px-6 text-center text-sm text-muted-foreground">
+          The relationship workspace could not be displayed. Refresh the page or reopen this relationship.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function NetworkPage() {
   const { userId } = useAuth();
   const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [query, setQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -215,7 +250,12 @@ export default function NetworkPage() {
     }
   }, [relationships.length, searchParams, selectedRelationship, selectedRelationshipId, setSearchParams]);
 
-  const conversationList = useMemo(() => relationships.map((relationship) => conversationMap[relationship.id]).filter(Boolean), [conversationMap, relationships]);
+  const conversationList = useMemo(
+    () => relationships
+      .map((relationship) => conversationMap[relationship.id])
+      .filter((item): item is ConversationSummary => Boolean(item)),
+    [conversationMap, relationships],
+  );
   const singleRelationshipMode = relationships.length === 1;
   const totalPendingActions = inbox.filter((invite) => invite.status === 'pending').length + conversationList.reduce((sum, item) => sum + item.pendingIncomingApprovals + item.pendingOutgoingApprovals, 0);
 
@@ -369,7 +409,9 @@ export default function NetworkPage() {
 
           <div>
             {selectedRelationship ? (
-              <RelationshipWorkspace relationshipId={selectedRelationship.id} embedded />
+              <NetworkWorkspaceBoundary key={selectedRelationship.id}>
+                <RelationshipWorkspace relationshipId={selectedRelationship.id} embedded />
+              </NetworkWorkspaceBoundary>
             ) : (
               <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-border bg-card text-sm text-muted-foreground">
                 Select a relationship to open its workspace.
