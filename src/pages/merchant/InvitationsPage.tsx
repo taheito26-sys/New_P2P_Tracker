@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { invites as invitesApi } from '@/lib/api';
+import { useNavigate } from 'react-router-dom';
+import * as api from '@/lib/api';
+const invitesApi = api.invites;
 import { useT } from '@/lib/i18n';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -19,6 +21,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function InvitationsPage() {
+  const navigate = useNavigate();
   const t = useT();
   const [inbox, setInbox] = useState<MerchantInvite[]>([]);
   const [sent, setSent] = useState<MerchantInvite[]>([]);
@@ -39,8 +42,66 @@ export default function InvitationsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const handleAccept = async (id: string) => {
-    try { await invitesApi.accept(id); toast.success(t('inviteAccepted')); load(); }
+
+  const waitForRelationship = async (counterpartyMerchantId: string, timeoutMs = 8000) => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const { relationships } = await api.relationships.list();
+      const relationship = relationships.find((rel) => rel.counterparty?.merchant_id === counterpartyMerchantId);
+      if (relationship) return relationship;
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }
+
+    return null;
+  };
+
+  const waitForRelationshipWorkspace = async (relationshipId: string, timeoutMs = 8000) => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        await api.relationships.get(relationshipId);
+        return true;
+      } catch (err) {
+        if (err instanceof api.ApiError && err.status === 404) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return false;
+  };
+
+  const handleAccept = async (invite: MerchantInvite) => {
+    try {
+      const response = await invitesApi.accept(invite.id);
+      console.info('[InvitationsPage] invite accepted', {
+        inviteId: invite.id,
+        relationshipId: response.relationship_id,
+        counterpartyMerchantId: invite.from_merchant_id,
+      });
+      toast.success(t('inviteAccepted'));
+      await load();
+
+      const targetRelationshipId = response.relationship_id || (await waitForRelationship(invite.from_merchant_id))?.id;
+      if (!targetRelationshipId) {
+        toast.error('Relationship workspace could not be opened. Please refresh and try again.');
+        await Promise.allSettled([load(), api.relationships.list()]);
+        return;
+      }
+
+      const workspaceReady = await waitForRelationshipWorkspace(targetRelationshipId);
+      if (!workspaceReady) {
+        toast.error('Relationship workspace could not be opened. Please refresh and try again.');
+        await Promise.allSettled([load(), api.relationships.list()]);
+        return;
+      }
+
+      navigate(`/network/relationships/${targetRelationshipId}`);
+    }
     catch (err: any) { toast.error(err.message); }
   };
   const handleReject = async (id: string) => {
@@ -86,7 +147,7 @@ export default function InvitationsPage() {
                   </div>
                   {inv.status === 'pending' && (
                     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-                      <Button size="sm" onClick={() => handleAccept(inv.id)} className="gap-1"><Check className="w-3.5 h-3.5" /> {t('accept')}</Button>
+                      <Button size="sm" onClick={() => handleAccept(inv)} className="gap-1"><Check className="w-3.5 h-3.5" /> {t('accept')}</Button>
                       <Button size="sm" variant="outline" onClick={() => handleReject(inv.id)} className="gap-1"><X className="w-3.5 h-3.5" /> {t('reject')}</Button>
                     </div>
                   )}

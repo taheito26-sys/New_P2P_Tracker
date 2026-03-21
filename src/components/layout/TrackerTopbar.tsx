@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, Bell, Menu, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { Activity, Menu, Plus, Search, SlidersHorizontal, Users } from 'lucide-react';
 import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import ActivityCenter from '@/components/notifications/ActivityCenter';
 import '@/styles/tracker.css';
 
 const RANGE_OPTIONS = [
@@ -76,6 +77,7 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
           </div>
 
           <div className="tracker-topbar-mobile-actions">
+            <ActivityCenter triggerLabel="Activity" className="max-w-[11rem] justify-between" />
             <button
               className={cn('tracker-icon-btn tracker-icon-btn--mobile-toggle', mobileControlsOpen && 'active')}
               type="button"
@@ -85,8 +87,8 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
               <SlidersHorizontal size={15} />
             </button>
             <span className="tracker-user-avatar">{(profile?.display_name || 'U').charAt(0).toUpperCase()}</span>
-            <button className="tracker-plus tracker-plus--mobile" type="button" onClick={() => navigate('/trading/orders')}>
-              <Plus size={16} />
+            <button className="tracker-plus tracker-plus--mobile" type="button" onClick={() => navigate('/network#merchant-search')}>
+              <Users size={16} />
             </button>
           </div>
         </div>
@@ -120,21 +122,20 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
               <button className={cn(settings.currency === 'USDT' && 'active')} onClick={() => update({ currency: 'USDT' })} type="button">USDT</button>
             </div>
 
-            <div className="tracker-seg tracker-seg--mobile" role="group" aria-label={t('language')}>
-              <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
-              <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
-            </div>
-
-            <div className="tracker-alert-box tracker-alert-box--mobile-panel">
-              <Bell className="tracker-alert-icon" />
-              <input
-                type="number"
-                step="0.5"
-                min={0}
-                value={settings.priceAlertThreshold}
-                onChange={(e) => update({ priceAlertThreshold: Number(e.target.value) || 0 })}
-              />
-              <span>%</span>
+            <div className="space-y-2">
+              <ActivityCenter triggerLabel="Activity" className="w-full justify-between" />
+              <button
+                className="inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                type="button"
+                onClick={() => navigate('/network#merchant-search')}
+              >
+                <Users size={15} />
+                Find merchants
+              </button>
+              <div className="tracker-seg tracker-seg--mobile" role="group" aria-label={t('language')}>
+                <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
+                <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
+              </div>
             </div>
 
             <button className="tracker-icon-btn tracker-icon-btn--mobile-panel" type="button" title={t('diagnostics')}>
@@ -188,21 +189,20 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
           <button className={cn(settings.currency === 'USDT' && 'active')} onClick={() => update({ currency: 'USDT' })} type="button">USDT</button>
         </div>
 
-        <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('language')}>
-          <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
-          <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
-        </div>
-
-        <div className={cn('tracker-alert-box', isMobile && 'tracker-alert-box--compact')}>
-          <Bell className="tracker-alert-icon" />
-          <input
-            type="number"
-            step="0.5"
-            min={0}
-            value={settings.priceAlertThreshold}
-            onChange={(e) => update({ priceAlertThreshold: Number(e.target.value) || 0 })}
-          />
-          <span>%</span>
+        <div className="flex items-center gap-2">
+          <ActivityCenter triggerLabel="Activity" className="justify-between" />
+          <button
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            type="button"
+            onClick={() => navigate('/network#merchant-search')}
+          >
+            <Users size={15} />
+            Find merchants
+          </button>
+          <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('language')}>
+            <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
+            <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
+          </div>
         </div>
 
         <button className={cn('tracker-icon-btn', isMobile && 'tracker-icon-btn--compact')} type="button" title={t('diagnostics')}>
