@@ -56,10 +56,28 @@ export default function P2PTrackerPage() {
       const msg = err instanceof ApiError && err.status === 503
         ? 'Live P2P market data is unavailable.'
         : err instanceof Error ? err.message : 'Failed to load P2P data';
-      setSnapshot(null);
+      setSnapshot({
+        ts: Date.now(),
+        market,
+        source: 'unavailable',
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+        status: 'unavailable',
+        unavailableReason: msg,
+        sellAvg: null,
+        buyAvg: null,
+        bestSell: null,
+        bestBuy: null,
+        sellDepth: 0,
+        buyDepth: 0,
+        spread: null,
+        spreadPct: null,
+        sellOffers: [],
+        buyOffers: [],
+      });
       setHistory([]);
       setLastUpdate(null);
-      setError(msg);
+      setError(null);
       toast.error(msg);
     } finally {
       setLoading(false);
