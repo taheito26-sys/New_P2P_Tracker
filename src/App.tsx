@@ -1,3 +1,4 @@
+import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -32,6 +33,36 @@ import NotificationsPage from "./pages/NotificationsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('[RouteErrorBoundary] route render failed', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-center">
+          <h2 className="text-lg font-semibold">This page could not be rendered.</h2>
+          <p className="max-w-md text-sm text-muted-foreground">
+            Try refreshing the page. If the issue continues, the data source may be temporarily unavailable.
+          </p>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isLoading, isAuthenticated } = useAuth();
@@ -72,11 +103,11 @@ const App = () => (
               <Route path="/trading/orders" element={<OrdersPage />} />
               <Route path="/trading/stock" element={<StockPage />} />
               <Route path="/trading/calendar" element={<CalendarPage />} />
-              <Route path="/trading/p2p" element={<P2PTrackerPage />} />
+              <Route path="/trading/p2p" element={<RouteErrorBoundary><P2PTrackerPage /></RouteErrorBoundary>} />
               <Route path="/crm" element={<CRMPage />} />
 
               {/* Network (combined: Directory + Invitations + Relationships + Approvals) */}
-              <Route path="/network" element={<NetworkPage />} />
+              <Route path="/network" element={<RouteErrorBoundary><NetworkPage /></RouteErrorBoundary>} />
               <Route path="/network/relationships/:id" element={<RelationshipWorkspace />} />
 
               {/* Supporting */}
