@@ -529,6 +529,16 @@ export async function getP2PSnapshotWithFallback(marketInput: string | undefined
     const snapshot = await fetchTransientLiveSnapshot(market, env);
     return snapshot;
   } catch (error) {
+    const meta = await getSyncMeta(env, market);
+    const failures = meta.consecutiveFailures + 1;
+    const quarantineUntil = failures >= PEER_FAILURE_THRESHOLD
+      ? new Date(Date.now() + PEER_FAILURE_QUARANTINE_MS).toISOString()
+      : null;
+    await putSyncMeta(env, market, {
+      ...meta,
+      consecutiveFailures: failures,
+      quarantineUntil,
+    });
     if (cached && cached.source === 'live') {
       return staleSnapshot(cached, LIVE_MAX_RETRIES);
     }
@@ -564,3 +574,4 @@ export async function scheduledRefreshAllMarkets(env: ProviderEnv, log: Pick<Con
 }
 
 export { normalizeMarketId, P2P_MARKETS };
+

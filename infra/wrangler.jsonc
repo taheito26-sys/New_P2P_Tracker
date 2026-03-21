@@ -10,9 +10,7 @@
                           "enabled":  true
                       },
     "triggers":  {
-                       "crons":  [
-                                     "*/5 * * * *"
-                                 ]
+                       "crons":  []
                    },
     "kv_namespaces":  [
                           {
