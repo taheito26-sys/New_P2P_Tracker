@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertDealStatusTransition, canTransitionDealStatus, getAllowedDealStatusTransitions, normalizeDealStatus } from '../lib/merchant-deal-status';
+import { assertDealStatusTransition, canTransitionDealStatus, getAllowedDealStatusTransitions } from '../lib/merchant-deal-status';
 
 describe('merchant deal status machine', () => {
   it('allows the canonical happy-path transitions', () => {
@@ -24,11 +24,5 @@ describe('merchant deal status machine', () => {
   it('exposes the same allowed transitions for all clients from one canonical model', () => {
     expect(getAllowedDealStatusTransitions('pending')).toEqual(['approved']);
     expect(getAllowedDealStatusTransitions('approved')).toEqual([]);
-  });
-
-  it('normalizes legacy live-data statuses without crashing clients', () => {
-    expect(normalizeDealStatus('draft')).toBe('pending');
-    expect(normalizeDealStatus('settled')).toBe('approved');
-    expect(getAllowedDealStatusTransitions('draft')).toEqual(['approved']);
   });
 });

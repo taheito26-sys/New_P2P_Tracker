@@ -136,8 +136,8 @@ export default function NetworkPage() {
   const pendingApprovals = aprInbox.filter(a => a.status === 'pending');
   const totalAlerts = pendingInvites.length + pendingApprovals.length;
   const totalUnread = Object.values(unreadMap).reduce((s, n) => s + n, 0);
-  const pendingDeals = allDeals.filter(d => normalizeDealStatus(d.status) === 'pending');
-  const activeDeals = allDeals.filter(d => normalizeDealStatus(d.status) === 'approved');
+  const pendingDeals = allDeals.filter(d => d.status === 'pending');
+  const activeDeals = allDeals.filter(d => d.status === 'approved');
 
   const filteredDeals = useMemo(() => {
     if (dealFilter === 'all') return allDeals;
@@ -444,7 +444,7 @@ export default function NetworkPage() {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-7 h-7 rounded-md flex items-center justify-center text-sm shrink-0 ${
-                          normalizeDealStatus(deal.status) === 'approved' ? 'bg-emerald-500/10' : 'bg-secondary'
+                          deal.status === 'approved' ? 'bg-emerald-500/10' : 'bg-secondary'
                         }`}>
                           {cfg?.icon || '📋'}
                         </div>

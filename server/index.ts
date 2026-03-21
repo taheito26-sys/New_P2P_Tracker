@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import { assertDealStatusTransition, normalizeDealStatus } from '../src/lib/merchant-deal-status';
-import { analyzeDealDeleteDiagnostics, type LinkedFinancialRecord } from '../src/lib/merchant-deal-delete';
+import { assertDealStatusTransition } from '../src/lib/merchant-deal-status';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { getP2PHistory, getP2PSnapshotWithFallback, normalizeMarketId, scheduledRefreshAllMarkets } from './p2p-provider';
@@ -399,7 +398,7 @@ async function summaryForRelationship(c: Context<{ Bindings: Bindings; Variables
   let activeExposure = 0;
   let realizedProfit = 0;
   for (const deal of deals.results) {
-    if (normalizeDealStatus(deal.status) === 'approved') activeExposure += deal.amount || 0;
+    if (deal.status === 'approved') activeExposure += deal.amount || 0;
     realizedProfit += deal.realized_pnl || 0;
   }
 
@@ -889,56 +888,18 @@ merchant.delete('/deals/:id', async (c) => {
   const access = await relationshipAccess(c, deal.relationship_id);
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
 
-  const [settlements, profits, pendingCloseApproval] = await Promise.all([
-    c.env.DB.prepare(`
-      SELECT s.id, s.deal_id, s.status, a.status AS approval_status, a.id AS approval_id
-      FROM merchant_settlements s
-      LEFT JOIN merchant_approvals a
-        ON a.target_entity_type = 'settlement'
-       AND a.target_entity_id = s.id
-      WHERE s.deal_id = ?
-      ORDER BY s.created_at DESC
-    `).bind(deal.id).all<LinkedFinancialRecord>(),
-    c.env.DB.prepare(`
-      SELECT p.id, p.deal_id, p.status, a.status AS approval_status, a.id AS approval_id
-      FROM merchant_profit_records p
-      LEFT JOIN merchant_approvals a
-        ON a.target_entity_type = 'profit'
-       AND a.target_entity_id = p.id
-      WHERE p.deal_id = ?
-      ORDER BY p.created_at DESC
-    `).bind(deal.id).all<LinkedFinancialRecord>(),
+  const [settlement, profit, pendingCloseApproval] = await Promise.all([
+    c.env.DB.prepare('SELECT id FROM merchant_settlements WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
+    c.env.DB.prepare('SELECT id FROM merchant_profit_records WHERE deal_id = ? LIMIT 1').bind(deal.id).first<{ id: string }>(),
     c.env.DB.prepare('SELECT id FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ? AND status = ? LIMIT 1').bind('deal', deal.id, 'pending').first<{ id: string }>(),
   ]);
 
-  const deleteDiagnostics = analyzeDealDeleteDiagnostics({
-    dealId: deal.id,
-    settlements: settlements.results,
-    profits: profits.results,
-  });
-
-  console.info('[merchant-deals] delete attempt diagnostics', {
-    dealId: deal.id,
-    relationshipId: deal.relationship_id,
-    settlementIds: settlements.results.map((row) => row.id),
-    profitIds: profits.results.map((row) => row.id),
-    blockers: deleteDiagnostics.blockers,
-    ignored: deleteDiagnostics.ignored,
-    pendingCloseApprovalId: pendingCloseApproval?.id || null,
-  });
-
-  if (deleteDiagnostics.blockers.length > 0) {
-    return c.json({
-      error: 'Deal deletion blocked by linked financial records',
-      detail: {
-        blockers: deleteDiagnostics.blockers,
-        ignored: deleteDiagnostics.ignored,
-      },
-    }, 409);
+  if (settlement || profit) {
+    return c.json({ error: 'Deal cannot be deleted once settlement or profit records exist' }, 409);
   }
 
   if (pendingCloseApproval) {
-    return c.json({ error: 'Deal cannot be deleted while a close approval request is still pending. Resolve the approval first, then retry if the deal is still deletable.' }, 409);
+    return c.json({ error: 'Deal cannot be deleted while a close approval request is still pending' }, 409);
   }
 
   await c.env.DB.prepare('DELETE FROM merchant_approvals WHERE target_entity_type = ? AND target_entity_id = ?').bind('deal', deal.id).run();
@@ -1485,7 +1446,7 @@ app.get('/api/analytics', requireAuth, async (c) => {
 
   const today = new Date().toISOString().split('T')[0];
   deals.results.forEach((deal) => {
-    const isApproved = normalizeDealStatus(deal.status) === 'approved';
+    const isApproved = deal.status === 'approved';
 
     totalDeployed += deal.amount || 0;
     if (isApproved) {

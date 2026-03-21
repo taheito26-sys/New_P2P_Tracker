@@ -136,10 +136,59 @@ export const relationships = {
 };
 
 export const deals = {
-  list: (relationshipId: string) => request<{ deals: MerchantDeal[] }>(`/api/merchant/deals?relationship_id=${relationshipId}`),
-  create: (data: Partial<MerchantDeal>) => request<{ ok: boolean; deal: MerchantDeal }>('/api/merchant/deals', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: Partial<MerchantDeal>) => request<{ ok: boolean; deal: MerchantDeal }>(`/api/merchant/deals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  remove: (id: string) => request<{ ok: boolean; deleted: string }>(`/api/merchant/deals/${id}`, { method: 'DELETE' }),
+  list: (relationshipId?: string) =>
+    request<{ deals: MerchantDeal[] }>(
+      relationshipId
+        ? `/api/merchant/deals?relationship_id=${relationshipId}`
+        : '/api/merchant/deals'
+    ),
+
+  create: (data: Partial<MerchantDeal> & { relationship_id: string }) =>
+    request<{ ok: boolean; deal: MerchantDeal }>('/api/merchant/deals', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: Partial<MerchantDeal>) =>
+    request<{ ok: boolean; deal: MerchantDeal }>(`/api/merchant/deals/${id}`, {
+      method: 'PATCH', body: JSON.stringify(data),
+    }),
+
+  deletePermanent: (id: string) =>
+    request<{ ok: boolean; deleted: string }>(`/api/merchant/deals/${id}`, {
+      method: 'DELETE',
+    }),
+
+  delete: (id: string) =>
+    deals.deletePermanent(id),
+
+  submitSettlement: (dealId: string, data: { amount: number; currency?: string; note?: string }) =>
+    request<{ ok: boolean; settlement_id: string; approval_id: string }>(`/api/merchant/deals/${dealId}/submit-settlement`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+
+  recordProfit: (dealId: string, data: { amount: number; period_key?: string; currency?: string; note?: string }) =>
+    request<{ ok: boolean; profit_id: string; approval_id: string }>(`/api/merchant/deals/${dealId}/record-profit`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+
+  close: (dealId: string, data?: { close_date?: string; note?: string }) =>
+    request<{ ok: boolean; approval_id: string }>(`/api/merchant/deals/${dealId}/close`, {
+      method: 'POST', body: JSON.stringify(data || {}),
+    }),
+};
+
+// ─── Messages API ───────────────────────────────────────────────────
+export const messages = {
+  list: (relationshipId: string) =>
+    request<{ messages: MerchantMessage[] }>(`/api/merchant/messages/${relationshipId}/messages`),
+
+  send: (relationshipId: string, body: string, messageType?: string) =>
+    request<{ ok: boolean; message: MerchantMessage }>(`/api/merchant/messages/${relationshipId}/messages`, {
+      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text' }),
+    }),
+
+  markRead: (messageId: string) =>
+    request<{ ok: boolean }>(`/api/merchant/messages/mark-read/${messageId}`, { method: 'POST' }),
 };
 
 export const approvals = {

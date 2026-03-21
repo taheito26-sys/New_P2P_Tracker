@@ -9,7 +9,7 @@ import { Briefcase } from 'lucide-react';
 import { getAgreementFamilyLabel, getDealShares } from '@/lib/deal-templates';
 import { isSupportedDealType } from '@/types/domain';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getAllowedDealStatusTransitions, normalizeDealStatus } from '@/lib/merchant-deal-status';
+import { getAllowedDealStatusTransitions } from '@/lib/merchant-deal-status';
 import type { MerchantDeal, MerchantRelationship } from '@/types/domain';
 
 const statusColors: Record<string, string> = {
@@ -18,62 +18,7 @@ const statusColors: Record<string, string> = {
 };
 
 function canDeleteDeal(deal: MerchantDeal): boolean {
-  return normalizeDealStatus(deal.status) === 'pending' && deal.realized_pnl == null && !deal.close_date;
-}
-
-function getDeleteLockReason(deal: MerchantDeal): string {
-  if (deal.realized_pnl != null) return 'History recorded';
-  if (deal.close_date) return 'Already closed';
-  if (normalizeDealStatus(deal.status) === 'approved') return 'Approved deal';
-  return 'Locked';
-}
-
-function getDeleteLockExplanation(deal: MerchantDeal): string {
-  if (deal.realized_pnl != null) {
-    return 'This deal already has recorded profit/loss history, so it must stay in the ledger.';
-  }
-  if (deal.close_date) {
-    return 'This deal is already closed, so deletion is disabled.';
-  }
-  if (normalizeDealStatus(deal.status) === 'approved') {
-    return 'This deal is already approved. Approved deals are treated as shared business records and cannot be deleted.';
-  }
-  return 'Deletion is available only while the deal is still pending and has no recorded history.';
-}
-
-type DeleteBlocker = {
-  kind: 'settlement' | 'profit' | string;
-  id: string;
-  reason: 'approved_record' | 'pending_approval' | string;
-};
-
-function formatDeleteBlockers(blockers: DeleteBlocker[]): string {
-  const groups = new Map<string, number>();
-
-  for (const blocker of blockers) {
-    const reasonLabel = blocker.reason === 'pending_approval'
-      ? 'still pending approval'
-      : 'already approved';
-    const kindLabel = blocker.kind === 'profit'
-      ? 'profit record'
-      : blocker.kind === 'settlement'
-        ? 'settlement record'
-        : 'linked record';
-    const label = `${kindLabel} ${reasonLabel}`;
-    groups.set(label, (groups.get(label) || 0) + 1);
-  }
-
-  const summary = Array.from(groups.entries()).map(([label, count]) => (
-    `${count} ${label}${count === 1 ? '' : 's'}`
-  ));
-
-  if (summary.length === 0) {
-    return 'This deal can no longer be deleted because it has linked financial records.';
-  }
-  if (summary.length === 1) {
-    return `Deletion blocked: this deal has ${summary[0]}.`;
-  }
-  return `Deletion blocked: this deal has ${summary.join(' and ')}.`;
+  return deal.status === 'pending' && deal.realized_pnl == null && !deal.close_date;
 }
 
 export default function DealsPage() {
@@ -114,7 +59,7 @@ export default function DealsPage() {
     setEditingDeal(deal);
     setEditTitle(deal.title || '');
     setEditAmount(String(deal.amount || 0));
-    setEditStatus(normalizeDealStatus(deal.status));
+    setEditStatus(deal.status || 'pending');
     setEditNote(String((deal.metadata as any)?.note || ''));
   };
 
@@ -146,12 +91,7 @@ export default function DealsPage() {
       toast.success(t('deletedSuccessfully'));
     } catch (err: any) {
       if (err?.status === 409) {
-        const blockers = err?.body?.detail?.blockers as DeleteBlocker[] | undefined;
-        if (blockers?.length) {
-          toast.error(formatDeleteBlockers(blockers));
-          return;
-        }
-        toast.error(err?.message || 'This deal can no longer be deleted. Review any linked settlement, profit, or approval records instead.');
+        toast.error('This deal can no longer be deleted because related approvals or settlement records already exist.');
         return;
       }
       toast.error(err.message);
@@ -195,7 +135,6 @@ export default function DealsPage() {
                   const merchantName = relationship?.counterparty?.display_name || '—';
                   const customerName = String((deal.metadata as any)?.customer_name || '');
                   const deletable = canDeleteDeal(deal);
-                  const normalizedStatus = normalizeDealStatus(deal.status);
 
                   return (
                     <tr key={deal.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
@@ -212,7 +151,7 @@ export default function DealsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`text-xs ${statusColors[normalizedStatus] || statusColors.pending}`}>{normalizedStatus}</Badge>
+                        <Badge className={`text-xs ${statusColors[deal.status] || statusColors.pending}`}>{deal.status}</Badge>
                         {isLegacy && <Badge variant="secondary" className="text-xs ml-1">{t('legacyAgreement')}</Badge>}
                       </td>
                       <td className="px-4 py-3">
@@ -254,7 +193,7 @@ export default function DealsPage() {
                               {t('delete')}
                             </button>
                           ) : (
-                            <span className="text-xs text-muted-foreground">{getDeleteLockReason(deal)}</span>
+                            <span className="text-xs text-muted-foreground">Locked</span>
                           )}
                         </div>
                       </td>
@@ -327,7 +266,7 @@ export default function DealsPage() {
                   onChange={e => setEditStatus(e.target.value)}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 >
-                  {[normalizeDealStatus(editingDeal?.status), ...getAllowedDealStatusTransitions(editingDeal?.status)]
+                  {[editingDeal?.status, ...getAllowedDealStatusTransitions((editingDeal?.status || 'pending') as any)]
                     .filter((status, index, arr): status is string => Boolean(status) && arr.indexOf(status) === index)
                     .map(status => (
                       <option key={status} value={status}>{status}</option>
@@ -356,7 +295,7 @@ export default function DealsPage() {
                 {t('delete')}
               </button>
             ) : (
-              <span className="text-xs text-muted-foreground">{editingDeal ? getDeleteLockExplanation(editingDeal) : 'Deletion is unavailable for this deal.'}</span>
+              <span className="text-xs text-muted-foreground">Deletion is available only while the deal is still pending and untouched.</span>
             )}
             <div className="flex gap-2 ml-auto">
               <button
