@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getP2PHistory, getP2PSnapshot, getP2PSnapshotWithFallback, normalizeMarketId, refreshP2PMarketSnapshot, scheduledRefreshAllMarkets } from '../../server/p2p-provider';
+import { getP2PMarketConfig } from '@/lib/p2p-markets';
 import { worker } from '../../server/index';
 
 class MemoryKV {
@@ -32,6 +33,14 @@ describe('p2p provider market normalization', () => {
 
   it('rejects invalid market ids', () => {
     expect(() => normalizeMarketId('invalid')).toThrow(/unsupported market/i);
+  });
+
+  it('configures Binance fiat ids for all supported markets', () => {
+    expect(getP2PMarketConfig('qatar').binanceFiat).toBe('QAR');
+    expect(getP2PMarketConfig('uae').binanceFiat).toBe('AED');
+    expect(getP2PMarketConfig('egypt').binanceFiat).toBe('EGP');
+    expect(getP2PMarketConfig('aed').market).toBe('uae');
+    expect(getP2PMarketConfig('egp').market).toBe('egypt');
   });
 });
 
