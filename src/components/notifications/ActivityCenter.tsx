@@ -113,11 +113,12 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
     const results = await Promise.allSettled([
       api.invites.inbox(),
       api.approvals.inbox(),
+      api.approvals.sent(),
       api.deals.list(),
       api.relationships.list(),
     ]);
 
-    const [invitesRes, approvalsRes, dealsRes, relsRes] = results;
+    const [invitesRes, approvalsInboxRes, approvalsSentRes, dealsRes, relsRes] = results;
 
     if (invitesRes.status === 'fulfilled') {
       setInvites(invitesRes.value.invites);
@@ -126,11 +127,21 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
       setError(getErrorMessage(invitesRes.reason, 'Notifications could not be loaded'));
     }
 
-    if (approvalsRes.status === 'fulfilled') {
-      setApprovals(approvalsRes.value.approvals);
+    const mergedApprovals = [
+      ...(approvalsInboxRes.status === 'fulfilled' ? approvalsInboxRes.value.approvals : []),
+      ...(approvalsSentRes.status === 'fulfilled' ? approvalsSentRes.value.approvals : []),
+    ];
+
+    if (mergedApprovals.length > 0 || (approvalsInboxRes.status === 'fulfilled' && approvalsSentRes.status === 'fulfilled')) {
+      setApprovals(mergedApprovals);
     } else {
       setApprovals([]);
-      setError(prev => prev || getErrorMessage(approvalsRes.reason, 'Notifications could not be loaded'));
+    }
+
+    if (approvalsInboxRes.status === 'rejected') {
+      setError(prev => prev || getErrorMessage(approvalsInboxRes.reason, 'Notifications could not be loaded'));
+    } else if (approvalsSentRes.status === 'rejected') {
+      setError(prev => prev || getErrorMessage(approvalsSentRes.reason, 'Notifications could not be loaded'));
     }
 
     if (dealsRes.status === 'fulfilled') {
@@ -214,9 +225,14 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
     [invites]
   );
 
-  const pendingApprovals = useMemo(
-    () => approvals.filter(approval => approval.status === 'pending'),
-    [approvals]
+  const incomingPendingApprovals = useMemo(
+    () => approvals.filter((approval) => approval.status === 'pending' && approval.reviewer_user_id === userId),
+    [approvals, userId]
+  );
+
+  const outgoingPendingApprovals = useMemo(
+    () => approvals.filter((approval) => approval.status === 'pending' && approval.submitted_by_user_id === userId && approval.reviewer_user_id !== userId),
+    [approvals, userId]
   );
 
   const relMap = useMemo(() => {
@@ -231,7 +247,7 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
     const grouped = new Map<string, MerchantApproval[]>();
     const standalone: MerchantApproval[] = [];
 
-    pendingApprovals.forEach(approval => {
+    incomingPendingApprovals.forEach(approval => {
       const dealId = approval.target_entity_type === 'deal' && approval.target_entity_id
         ? approval.target_entity_id
         : null;
@@ -246,7 +262,7 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
     });
 
     return { grouped, standalone };
-  }, [pendingApprovals]);
+  }, [incomingPendingApprovals]);
 
   const runAction = useCallback(async (actionId: string, fn: () => Promise<void>) => {
     try {
@@ -394,6 +410,35 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
       });
     });
 
+    const outgoingApprovalItems: NotificationItem[] = outgoingPendingApprovals.map((approval) => {
+      const relationship = relMap[approval.relationship_id];
+      const deal = approval.target_entity_type === 'deal'
+        ? deals.find((candidate) => candidate.id === approval.target_entity_id)
+        : null;
+      const dealLabel = deal ? (DEAL_TYPE_CONFIGS[deal.deal_type]?.label || deal.title || deal.deal_type) : approval.type.replace(/_/g, ' ');
+      const counterpartyName = relationship?.counterparty?.display_name || relationship?.counterparty?.nickname || t('partner');
+
+      return {
+        id: `approval-outgoing-${approval.id}`,
+        kind: 'approval',
+        priority: 'medium',
+        title: `${dealLabel} · ${counterpartyName}`,
+        description: t('awaitingCounterpartyApproval') || 'Awaiting counterparty approval',
+        icon: <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" aria-hidden="true" />,
+        actions: [
+          {
+            id: `open-outgoing-${approval.id}`,
+            label: t('open') || 'Open',
+            variant: 'secondary',
+            onSelect: () => {
+              if (approval.relationship_id) navigate(`/network/relationships/${approval.relationship_id}`);
+              setOpen(false);
+            },
+          },
+        ],
+      };
+    });
+
     const messageItems: NotificationItem[] = unreadConversations.map((conversation) => ({
       id: `message-${conversation.relationshipId}`,
       kind: 'message',
@@ -414,8 +459,8 @@ export default function ActivityCenter({ triggerLabel, className }: ActivityCent
       ],
     }));
 
-    return [...messageItems, ...inviteItems, ...approvalItems];
-  }, [pendingInvites, groupedApprovalItems, deals, relMap, navigate, runAction, t, unreadConversations]);
+    return [...messageItems, ...inviteItems, ...approvalItems, ...outgoingApprovalItems];
+  }, [pendingInvites, groupedApprovalItems, deals, relMap, navigate, outgoingPendingApprovals, runAction, t, unreadConversations]);
 
   const unreadCount = items.length;
   void userId;
