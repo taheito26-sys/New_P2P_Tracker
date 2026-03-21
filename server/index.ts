@@ -360,27 +360,41 @@ async function requireProfile(c: Context<{ Bindings: Bindings; Variables: Variab
   return await profileByUser(c, c.get('userId'));
 }
 
-async function relationshipAccess(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string): Promise<RelationshipAccess | null> {
+type RelationshipAccessResult =
+  | { kind: 'ok'; access: RelationshipAccess }
+  | { kind: 'missing_profile' }
+  | { kind: 'not_found' }
+  | { kind: 'forbidden' };
+
+async function getRelationshipAccessResult(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string): Promise<RelationshipAccessResult> {
   const myProfile = await requireProfile(c);
-  if (!myProfile) return null;
+  if (!myProfile) return { kind: 'missing_profile' };
 
   const relationship = await c.env.DB.prepare('SELECT * FROM merchant_relationships WHERE id = ?')
     .bind(relationshipId)
     .first<Relationship>();
-  if (!relationship) return null;
+  if (!relationship) return { kind: 'not_found' };
 
   const isA = relationship.merchant_a_id === myProfile.merchant_id;
   const isB = relationship.merchant_b_id === myProfile.merchant_id;
-  if (!isA && !isB) return null;
+  if (!isA && !isB) return { kind: 'forbidden' };
 
   const counterpartyMerchantId = isA ? relationship.merchant_b_id : relationship.merchant_a_id;
   return {
-    relationship,
-    myProfile,
-    myMerchantId: myProfile.merchant_id,
-    counterpartyMerchantId,
-    counterpartyProfile: await profileByMerchantId(c, counterpartyMerchantId),
+    kind: 'ok',
+    access: {
+      relationship,
+      myProfile,
+      myMerchantId: myProfile.merchant_id,
+      counterpartyMerchantId,
+      counterpartyProfile: await profileByMerchantId(c, counterpartyMerchantId),
+    },
   };
+}
+
+async function relationshipAccess(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string): Promise<RelationshipAccess | null> {
+  const result = await getRelationshipAccessResult(c, relationshipId);
+  return result.kind === 'ok' ? result.access : null;
 }
 
 async function summaryForRelationship(c: Context<{ Bindings: Bindings; Variables: Variables }>, relationshipId: string, myMerchantId: string) {
@@ -783,8 +797,12 @@ merchant.get('/relationships', async (c) => {
 });
 
 merchant.get('/relationships/:id', async (c) => {
-  const access = await relationshipAccess(c, c.req.param('id'));
-  if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+  const result = await getRelationshipAccessResult(c, c.req.param('id'));
+  if (result.kind === 'missing_profile') return c.json({ error: 'Merchant profile required' }, 403);
+  if (result.kind === 'not_found') return c.json({ error: 'Relationship not found' }, 404);
+  if (result.kind === 'forbidden') return c.json({ error: 'Relationship access denied' }, 403);
+
+  const access = result.access;
   return c.json({
     relationship: {
       ...access.relationship,

@@ -90,7 +90,7 @@ function RelationshipWorkspaceCore() {
     setLoadState((prev) => (prev === 'ready' ? 'ready' : 'loading'));
 
     const startedAt = Date.now();
-    const retryWindowMs = 8000;
+    const retryWindowMs = 2000;
 
     while (Date.now() - startedAt < retryWindowMs) {
       try {
@@ -141,7 +141,7 @@ function RelationshipWorkspaceCore() {
       } catch (err) {
         if (err instanceof api.ApiError) {
           if (err.status === 404) {
-            console.warn('[RelationshipWorkspace] relationship not found yet, retrying', { relationshipId: id, status: err.status });
+            console.warn('[RelationshipWorkspace] relationship lookup returned 404, retrying briefly', { relationshipId: id, status: err.status });
             setLoadState('retrying');
             await new Promise((resolve) => window.setTimeout(resolve, 500));
             continue;
@@ -163,7 +163,7 @@ function RelationshipWorkspaceCore() {
       }
     }
 
-    console.warn('[RelationshipWorkspace] relationship not found after retry window', { relationshipId: id });
+    console.warn('[RelationshipWorkspace] relationship could not be opened after retry window', { relationshipId: id });
     setLoadState('not_found');
     setLoading(false);
   }, [id, t, userId]);
@@ -255,14 +255,14 @@ function RelationshipWorkspaceCore() {
       <div className="flex h-[50vh] flex-col items-center justify-center gap-3 text-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">{loadState === 'retrying' ? 'Finalizing relationship workspace…' : (t('loading') || 'Loading')}</p>
-          <p className="text-xs text-muted-foreground">{loadState === 'retrying' ? 'Your accepted invite is being linked to a workspace. Retrying automatically…' : 'Loading workspace data…'}</p>
+          <p className="text-sm font-medium text-foreground">{t('loading') || 'Loading'}</p>
+          <p className="text-xs text-muted-foreground">{loadState === 'retrying' ? 'Retrying workspace lookup…' : 'Loading workspace data…'}</p>
         </div>
       </div>
     );
   }
   if (loadState === 'forbidden') return <div className="p-6 text-center text-muted-foreground">You do not have access to this relationship workspace.</div>;
-  if (loadState === 'not_found') return <div className="p-6 text-center text-muted-foreground">This relationship workspace is not available yet. Please try again in a moment.</div>;
+  if (loadState === 'not_found') return <div className="p-6 text-center text-muted-foreground">This relationship could not be opened.</div>;
   if (loadState === 'error' || !rel) return <div className="p-6 text-center text-muted-foreground">{t('relationshipNotFound')}</div>;
 
   const pendingApprovals = relApprovals.filter(a => a.status === 'pending');

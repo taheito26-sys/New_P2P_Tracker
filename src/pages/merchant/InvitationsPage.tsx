@@ -87,10 +87,20 @@ export default function InvitationsPage() {
       await load();
 
       const targetRelationshipId = response.relationship_id || (await waitForRelationship(invite.from_merchant_id))?.id;
-      if (targetRelationshipId) {
-        await waitForRelationshipWorkspace(targetRelationshipId);
-        navigate(`/network/relationships/${targetRelationshipId}`);
+      if (!targetRelationshipId) {
+        toast.error('Relationship workspace could not be opened. Please refresh and try again.');
+        await Promise.allSettled([load(), api.relationships.list()]);
+        return;
       }
+
+      const workspaceReady = await waitForRelationshipWorkspace(targetRelationshipId);
+      if (!workspaceReady) {
+        toast.error('Relationship workspace could not be opened. Please refresh and try again.');
+        await Promise.allSettled([load(), api.relationships.list()]);
+        return;
+      }
+
+      navigate(`/network/relationships/${targetRelationshipId}`);
     }
     catch (err: any) { toast.error(err.message); }
   };
