@@ -26,7 +26,6 @@ describe('api client contract', () => {
     expect(invites.reject).toBeTypeOf('function');
     expect(invites.withdraw).toBeTypeOf('function');
 
-    expect(approvals.review).toBeTypeOf('function');
     expect(approvals.approve).toBeTypeOf('function');
     expect(approvals.reject).toBeTypeOf('function');
 
@@ -60,17 +59,17 @@ describe('api client contract', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/merchant/invites/invite-3/withdraw', expect.objectContaining({ method: 'POST' }));
   });
 
-  it('routes approval aliases through review with the expected status payload', async () => {
+  it('routes approval aliases through the existing approve/reject endpoints', async () => {
     await approvals.approve('approval-1', 'looks good');
     await approvals.reject('approval-2', 'needs changes');
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/merchant/approvals/approval-1/review', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/merchant/approvals/approval-1/approve', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ status: 'approved', resolution_note: 'looks good' }),
+      body: JSON.stringify({ note: 'looks good' }),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/merchant/approvals/approval-2/review', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/merchant/approvals/approval-2/reject', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ status: 'rejected', resolution_note: 'needs changes' }),
+      body: JSON.stringify({ note: 'needs changes' }),
     }));
   });
 

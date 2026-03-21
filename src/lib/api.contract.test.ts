@@ -12,7 +12,6 @@ describe('api client contract', () => {
   });
 
   it('exposes approval methods used by the UI', () => {
-    expect(typeof approvals.review).toBe('function');
     expect(typeof approvals.approve).toBe('function');
     expect(typeof approvals.reject).toBe('function');
   });

@@ -457,10 +457,45 @@ async function auditLog(
   ).run();
 }
 
+async function createMerchantNotification(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  input: {
+    userId: string;
+    relationshipId?: string | null;
+    category: string;
+    title: string;
+    body?: string | null;
+    data?: Record<string, unknown>;
+  },
+) {
+  await c.env.DB.prepare(`
+    INSERT INTO merchant_notifications (id, user_id, relationship_id, category, title, body, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    `notif_${crypto.randomUUID()}`,
+    input.userId,
+    input.relationshipId || null,
+    input.category,
+    input.title,
+    input.body || null,
+    JSON.stringify(input.data || {}),
+  ).run();
+}
+
 function approvalResponse(approval: Approval) {
   return {
     ...approval,
     proposed_payload: parseJson<Record<string, unknown>>(approval.proposed_payload, {}),
+  };
+}
+
+function dealResponse(deal: Record<string, unknown> | null) {
+  if (!deal) return null;
+  const createdAt = typeof deal.created_at === 'string' ? deal.created_at : '';
+  return {
+    ...deal,
+    metadata: parseJson<Record<string, unknown>>(typeof deal.metadata === 'string' ? deal.metadata : null, {}),
+    issue_date: typeof deal.issue_date === 'string' && deal.issue_date ? deal.issue_date : createdAt.slice(0, 10),
   };
 }
 
@@ -827,7 +862,7 @@ merchant.get('/deals', async (c) => {
     const deals = await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE relationship_id = ? ORDER BY created_at DESC')
       .bind(relationshipId)
       .all();
-    return c.json({ deals: deals.results });
+    return c.json({ deals: deals.results.map((deal) => dealResponse(deal)) });
   }
 
   const profile = await requireProfile(c);
@@ -839,7 +874,7 @@ merchant.get('/deals', async (c) => {
     WHERE r.merchant_a_id = ? OR r.merchant_b_id = ?
     ORDER BY d.created_at DESC
   `).bind(profile.merchant_id, profile.merchant_id).all();
-  return c.json({ deals: deals.results });
+  return c.json({ deals: deals.results.map((deal) => dealResponse(deal)) });
 });
 
 merchant.post('/deals', async (c) => {
@@ -849,29 +884,73 @@ merchant.post('/deals', async (c) => {
     title?: string;
     amount?: number;
     currency?: string;
+    metadata?: Record<string, unknown>;
+    issue_date?: string;
     due_date?: string;
     expected_return?: number;
   }>();
   if (!body.relationship_id || !body.title) return c.json({ error: 'relationship_id and title are required' }, 400);
   const access = await relationshipAccess(c, body.relationship_id);
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
+  const reviewerUserId = await reviewerForRelationship(c, body.relationship_id, access.myMerchantId);
+  if (!reviewerUserId) return c.json({ error: 'No reviewer could be resolved for this relationship' }, 409);
 
   const dealId = `deal_${crypto.randomUUID()}`;
-  await c.env.DB.prepare(`
-    INSERT INTO merchant_deals (id, relationship_id, deal_type, title, amount, currency, status, created_by, due_date, expected_return)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    dealId,
-    body.relationship_id,
-    body.deal_type || 'general',
-    body.title,
-    body.amount || 0,
-    body.currency || 'USDT',
-    'pending',
-    c.get('userId'),
-    body.due_date || null,
-    body.expected_return ?? null,
-  ).run();
+  const approvalId = `apr_${crypto.randomUUID()}`;
+  const dealPayload = {
+    relationship_id: body.relationship_id,
+    deal_type: body.deal_type || 'general',
+    title: body.title,
+    amount: body.amount || 0,
+    currency: body.currency || 'USDT',
+    metadata: body.metadata || {},
+    issue_date: body.issue_date || new Date().toISOString().slice(0, 10),
+    due_date: body.due_date || null,
+    expected_return: body.expected_return ?? null,
+  };
+  await c.env.DB.batch([
+    c.env.DB.prepare(`
+      INSERT INTO merchant_deals (id, relationship_id, deal_type, title, amount, currency, status, metadata, issue_date, created_by, due_date, expected_return)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      dealId,
+      body.relationship_id,
+      dealPayload.deal_type,
+      dealPayload.title,
+      dealPayload.amount,
+      dealPayload.currency,
+      'pending',
+      JSON.stringify(dealPayload.metadata),
+      dealPayload.issue_date,
+      c.get('userId'),
+      dealPayload.due_date,
+      dealPayload.expected_return,
+    ),
+    c.env.DB.prepare(`
+      INSERT INTO merchant_approvals (id, relationship_id, type, target_entity_type, target_entity_id, proposed_payload, status, submitted_by_user_id, submitted_by_merchant_id, reviewer_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      approvalId,
+      body.relationship_id,
+      'deal_create',
+      'deal',
+      dealId,
+      JSON.stringify(dealPayload),
+      'pending',
+      c.get('userId'),
+      access.myMerchantId,
+      reviewerUserId,
+    ),
+  ]);
+
+  await createMerchantNotification(c, {
+    userId: reviewerUserId,
+    relationshipId: body.relationship_id,
+    category: 'deal',
+    title: `${access.myProfile.display_name} sent a new deal`,
+    body: `${body.title} is waiting for your approval`,
+    data: { deal_id: dealId, approval_id: approvalId, relationship_id: body.relationship_id },
+  });
 
   await auditLog(c, {
     relationshipId: body.relationship_id,
@@ -880,9 +959,10 @@ merchant.post('/deals', async (c) => {
     entityType: 'deal',
     entityId: dealId,
     action: 'created',
+    detail: { approval_id: approvalId },
   });
 
-  return c.json({ ok: true, deal: await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(dealId).first() });
+  return c.json({ ok: true, approval_id: approvalId, deal: dealResponse(await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(dealId).first()) });
 });
 
 merchant.patch('/deals/:id', async (c) => {
@@ -910,7 +990,7 @@ merchant.patch('/deals/:id', async (c) => {
     .bind(body.status, c.req.param('id'))
     .run();
 
-  return c.json({ ok: true, deal: await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(c.req.param('id')).first() });
+  return c.json({ ok: true, deal: dealResponse(await c.env.DB.prepare('SELECT * FROM merchant_deals WHERE id = ?').bind(c.req.param('id')).first()) });
 });
 
 merchant.delete('/deals/:id', async (c) => {
@@ -1074,16 +1154,22 @@ merchant.post('/messages/:id/messages', async (c) => {
   const access = await relationshipAccess(c, c.req.param('id'));
   if (!access) return c.json({ error: 'Relationship not found or inaccessible' }, 404);
 
-  const body = await c.req.json<{ body?: string; message_type?: string }>();
+  const body = await c.req.json<{ body?: string; message_type?: string; metadata?: Record<string, unknown> }>();
   if (!body.body?.trim()) return c.json({ error: 'Message body is required' }, 400);
 
   const messageId = `msg_${crypto.randomUUID()}`;
   await c.env.DB.prepare(`
-    INSERT INTO merchant_messages (id, relationship_id, sender_user_id, sender_merchant_id, body, message_type)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(messageId, c.req.param('id'), c.get('userId'), access.myMerchantId, body.body.trim(), body.message_type || 'text').run();
+    INSERT INTO merchant_messages (id, relationship_id, sender_user_id, sender_merchant_id, body, message_type, metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(messageId, c.req.param('id'), c.get('userId'), access.myMerchantId, body.body.trim(), body.message_type || 'text', JSON.stringify(body.metadata || {})).run();
 
-  return c.json({ ok: true, message: await c.env.DB.prepare('SELECT * FROM merchant_messages WHERE id = ?').bind(messageId).first() });
+  return c.json({
+    ok: true,
+    message: {
+      ...(await c.env.DB.prepare('SELECT * FROM merchant_messages WHERE id = ?').bind(messageId).first()),
+      metadata: body.metadata || {},
+    },
+  });
 });
 
 merchant.get('/approvals/inbox', async (c) => {
@@ -1107,8 +1193,9 @@ merchant.post('/approvals/:id/approve', async (c) => {
   if (!approval) return c.json({ error: 'Approval not found' }, 404);
   if (approval.reviewer_user_id !== c.get('userId')) return c.json({ error: 'Forbidden' }, 403);
 
-  await c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolved_at = datetime("now"), updated_at = datetime("now") WHERE id = ?')
-    .bind('approved', approval.id)
+  const body = await c.req.json<{ note?: string }>().catch(() => ({ note: undefined }));
+  await c.env.DB.prepare('UPDATE merchant_approvals SET status = ?, resolution_note = ?, resolved_at = datetime("now"), updated_at = datetime("now") WHERE id = ?')
+    .bind('approved', body.note || null, approval.id)
     .run();
 
   if (approval.target_entity_type === 'settlement') {
@@ -1147,6 +1234,10 @@ merchant.post('/approvals/:id/approve', async (c) => {
         .bind('approved', approval.target_entity_id)
         .run();
     }
+  } else if (approval.type === 'deal_create' && approval.target_entity_type === 'deal') {
+    await c.env.DB.prepare('UPDATE merchant_deals SET status = ?, updated_at = datetime("now") WHERE id = ?')
+      .bind('approved', approval.target_entity_id)
+      .run();
   }
 
   return c.json({ ok: true });
@@ -1173,6 +1264,10 @@ merchant.post('/approvals/:id/reject', async (c) => {
   } else if (approval.target_entity_type === 'profit') {
     await c.env.DB.prepare('UPDATE merchant_profit_records SET status = ?, updated_at = datetime("now") WHERE id = ?')
       .bind('rejected', approval.target_entity_id)
+      .run();
+  } else if (approval.type === 'deal_create' && approval.target_entity_type === 'deal') {
+    await c.env.DB.prepare('DELETE FROM merchant_deals WHERE id = ?')
+      .bind(approval.target_entity_id)
       .run();
   }
 

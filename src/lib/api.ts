@@ -160,7 +160,7 @@ export const deals = {
     ),
 
   create: (data: Partial<MerchantDeal> & { relationship_id: string }) =>
-    request<{ ok: boolean; deal: MerchantDeal }>('/api/merchant/deals', {
+    request<{ ok: boolean; approval_id: string; deal: MerchantDeal }>('/api/merchant/deals', {
       method: 'POST', body: JSON.stringify(data),
     }),
 
@@ -198,9 +198,9 @@ export const messages = {
   list: (relationshipId: string) =>
     request<{ messages: MerchantMessage[] }>(`/api/merchant/messages/${relationshipId}/messages`),
 
-  send: (relationshipId: string, body: string, messageType?: string) =>
+  send: (relationshipId: string, body: string, messageType?: string, metadata?: Record<string, unknown>) =>
     request<{ ok: boolean; message: MerchantMessage }>(`/api/merchant/messages/${relationshipId}/messages`, {
-      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text' }),
+      method: 'POST', body: JSON.stringify({ body, message_type: messageType || 'text', metadata }),
     }),
 
   markRead: (messageId: string) =>
@@ -212,11 +212,11 @@ const reviewApproval = (id: string, status: 'approved' | 'rejected', resolution_
 
 export const approvals = {
   inbox: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/inbox'),
-  mine: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/mine'),
-  sent: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/mine'),
-  review: reviewApproval,
-  approve: (id: string, resolution_note?: string) => reviewApproval(id, 'approved', resolution_note),
-  reject: (id: string, resolution_note?: string) => reviewApproval(id, 'rejected', resolution_note),
+  sent: () => request<{ approvals: MerchantApproval[] }>('/api/merchant/approvals/sent'),
+  approve: (id: string, note?: string) =>
+    request<{ ok: boolean }>(`/api/merchant/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
+  reject: (id: string, note?: string) =>
+    request<{ ok: boolean }>(`/api/merchant/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
 };
 
 export const audit = {
