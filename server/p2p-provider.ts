@@ -187,12 +187,98 @@ async function getHistoryFromKV(env: ProviderEnv, market: P2PMarket): Promise<P2
 }
 
 async function getSnapshotFromKV(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
-  let raw = await env.P2P_KV.get(kvKey(market, 'latest'), 'json') as Record<string, unknown> | null;
-  if (!raw && market === 'qatar') {
-    raw = await env.P2P_KV.get(legacyKvKey('latest'), 'json') as Record<string, unknown> | null;
+  try {
+    let raw = await env.P2P_KV.get(kvKey(market, 'latest'), 'json') as Record<string, unknown> | null;
+    if (!raw && market === 'qatar') {
+      raw = await env.P2P_KV.get(legacyKvKey('latest'), 'json') as Record<string, unknown> | null;
+    }
+    if (!raw || typeof raw !== 'object') return null;
+    return normalizeSnapshotRecord(raw, market);
+  } catch (error) {
+    console.error('[p2p.sync] failed to read snapshot from KV', { market, error });
+    return null;
   }
-  if (!raw || typeof raw !== 'object') return null;
-  return normalizeSnapshotRecord(raw, market);
+}
+
+async function getSyncMeta(env: ProviderEnv, market: P2PMarket): Promise<SyncMeta> {
+  try {
+    const raw = await env.P2P_KV.get(syncMetaKey(market), 'json') as SyncMeta | null;
+    if (!raw || typeof raw !== 'object') return initialSyncMeta(env);
+    return {
+      ...initialSyncMeta(env),
+      ...raw,
+      version: typeof raw.version === 'number' ? raw.version : 0,
+      lamport: typeof raw.lamport === 'number' ? raw.lamport : 0,
+      invalidationVersion: typeof raw.invalidationVersion === 'number' ? raw.invalidationVersion : 0,
+      consecutiveFailures: typeof raw.consecutiveFailures === 'number' ? raw.consecutiveFailures : 0,
+      quarantineUntil: typeof raw.quarantineUntil === 'string' ? raw.quarantineUntil : null,
+    };
+  } catch (error) {
+    console.error('[p2p.sync] failed to read sync metadata', { market, error });
+    return initialSyncMeta(env);
+  }
+}
+
+async function putSyncMeta(env: ProviderEnv, market: P2PMarket, meta: SyncMeta): Promise<void> {
+  await env.P2P_KV.put(syncMetaKey(market), JSON.stringify(meta));
+}
+
+function invalidateMemoryCache(market: P2PMarket, invalidationVersion: number) {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return;
+  if (entry.invalidationVersion < invalidationVersion) {
+    memorySnapshotCache.delete(market);
+  }
+}
+
+async function getSnapshotFromMemoryCache(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
+  const entry = memorySnapshotCache.get(market);
+  if (!entry) return null;
+
+  const cacheAgeMs = Date.now() - entry.cachedAt;
+  const meta = await getSyncMeta(env, market);
+  if (cacheAgeMs > MEMORY_CACHE_TTL_MS || entry.invalidationVersion < meta.invalidationVersion) {
+    memorySnapshotCache.delete(market);
+    return null;
+  }
+
+  return cloneSnapshot(entry.snapshot, {
+    servedFrom: 'memory_cache',
+    cacheAgeMs,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+    version: meta.version,
+    lamport: meta.lamport,
+    peerSource: meta.peerSource,
+  });
+}
+
+function cacheSnapshot(snapshot: P2PSnapshot, invalidationVersion: number) {
+  memorySnapshotCache.set(snapshot.market, {
+    snapshot,
+    cachedAt: Date.now(),
+    invalidationVersion,
+  });
+}
+
+async function runAntiEntropyPull(env: ProviderEnv, market: P2PMarket): Promise<P2PSnapshot | null> {
+  const meta = await getSyncMeta(env, market);
+  const kvSnapshot = await getSnapshotFromKV(env, market);
+  if (!kvSnapshot) {
+    invalidateMemoryCache(market, meta.invalidationVersion);
+    return null;
+  }
+
+  const repairedSnapshot = cloneSnapshot(kvSnapshot, {
+    servedFrom: 'kv',
+    cacheAgeMs: Date.now() - kvSnapshot.ts,
+    replicationLagMs: Math.max(0, Date.now() - new Date(meta.lastReplicationAt).getTime()),
+    version: meta.version,
+    lamport: meta.lamport,
+    peerSource: meta.peerSource,
+  });
+  invalidateMemoryCache(market, meta.invalidationVersion);
+  cacheSnapshot(repairedSnapshot, meta.invalidationVersion);
+  return repairedSnapshot;
 }
 
 async function getSyncMeta(env: ProviderEnv, market: P2PMarket): Promise<SyncMeta> {
