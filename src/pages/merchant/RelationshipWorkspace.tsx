@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import * as api from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
-import { createTrackerState } from '@/lib/tracker-demo-data';
 import { useTheme } from '@/lib/theme-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,6 +16,7 @@ import { useRealtimeRefresh } from '@/hooks/use-realtime';
 import { ArrowLeft, AlertTriangle, Check, Clock3, DollarSign, Loader2, MessageCircle, Plus, Send, TrendingUp, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MerchantApproval, MerchantDeal, MerchantMessage, MerchantRelationship } from '@/types/domain';
+import type { TrackerState } from '@/lib/tracker-helpers';
 
 type RelationshipWorkspaceProps = {
   relationshipId?: string;
@@ -81,12 +81,24 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
   const navigate = useNavigate();
   const t = useT();
 
-  const sharedData = useMemo(() => createTrackerState({
-    lowStockThreshold: settings.lowStockThreshold,
-    priceAlertThreshold: settings.priceAlertThreshold,
-    range: settings.range,
+  const sharedData = useMemo<TrackerState>(() => ({
     currency: settings.currency,
-  }).state, [settings.currency, settings.lowStockThreshold, settings.priceAlertThreshold, settings.range]);
+    range: settings.range,
+    batches: [],
+    trades: [],
+    customers: [],
+    cashQAR: 0,
+    cashOwner: 'merchant',
+    settings: {
+      lowStockThreshold: settings.lowStockThreshold,
+      priceAlertThreshold: settings.priceAlertThreshold,
+    },
+    cal: {
+      year: new Date().getUTCFullYear(),
+      month: new Date().getUTCMonth(),
+      selectedDay: null,
+    },
+  }), [settings.currency, settings.lowStockThreshold, settings.priceAlertThreshold, settings.range]);
   const [trackerState, setTrackerState] = useState(sharedData);
   const sharedCustomers = trackerState.customers;
   const sharedSuppliers = useMemo(() => {
