@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "find:merchant-dir": "node scripts/find-merchant-dir.mjs"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",
