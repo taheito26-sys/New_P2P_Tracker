@@ -64,7 +64,7 @@ export default function NetworkPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [query, setQuery] = useState('');
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  
   const [results, setResults] = useState<MerchantSearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searched, setSearched] = useState(false);
