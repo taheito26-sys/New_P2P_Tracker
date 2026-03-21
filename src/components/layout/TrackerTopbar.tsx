@@ -5,6 +5,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import NotificationCenter from '@/components/notifications/NotificationCenter';
 import '@/styles/tracker.css';
 
 const RANGE_OPTIONS = [
@@ -120,9 +121,12 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
               <button className={cn(settings.currency === 'USDT' && 'active')} onClick={() => update({ currency: 'USDT' })} type="button">USDT</button>
             </div>
 
-            <div className="tracker-seg tracker-seg--mobile" role="group" aria-label={t('language')}>
-              <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
-              <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
+            <div className="flex items-center gap-2">
+              <NotificationCenter />
+              <div className="tracker-seg tracker-seg--mobile" role="group" aria-label={t('language')}>
+                <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
+                <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
+              </div>
             </div>
 
             <div className="tracker-alert-box tracker-alert-box--mobile-panel">
@@ -188,9 +192,12 @@ export function TrackerTopbar({ isMobile = false, onMenuClick }: TrackerTopbarPr
           <button className={cn(settings.currency === 'USDT' && 'active')} onClick={() => update({ currency: 'USDT' })} type="button">USDT</button>
         </div>
 
-        <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('language')}>
-          <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
-          <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
+        <div className="flex items-center gap-2">
+          <NotificationCenter />
+          <div className={cn('tracker-seg', isMobile && 'tracker-seg--mobile')} role="group" aria-label={t('language')}>
+            <button className={cn(settings.language === 'ar' && 'active')} onClick={() => update({ language: 'ar' })} type="button">{t('arabic')}</button>
+            <button className={cn(settings.language === 'en' && 'active')} onClick={() => update({ language: 'en' })} type="button">{t('english')}</button>
+          </div>
         </div>
 
         <div className={cn('tracker-alert-box', isMobile && 'tracker-alert-box--compact')}>
