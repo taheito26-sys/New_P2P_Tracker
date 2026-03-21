@@ -1,4 +1,4 @@
-﻿{
+{
     "$schema":  "node_modules/wrangler/config-schema.json",
     "name":  "tracker-platform",
     "main":  "../server/index.ts",
@@ -26,7 +26,8 @@
     "vars":  {
                  "APP_ENV":  "development",
                  "ALLOWED_ORIGINS":  "*",
-                 "AUTH_SOURCE":  "cloudflare-access"
+                 "AUTH_SOURCE":  "cloudflare-access",
+                 "P2P_LIVE_PROVIDER_URL":  "https://p2p-tracker-api.taheito26.workers.dev/api/p2p"
              },
     "assets":  {
                    "directory":  "../dist",

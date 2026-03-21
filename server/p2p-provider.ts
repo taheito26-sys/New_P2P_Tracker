@@ -14,99 +14,12 @@ const LIVE_MAX_RETRIES = 2;
 const LIVE_BACKOFF_MS = 250;
 
 function kvKey(market: P2PMarket, kind: 'latest' | 'history'): string {
+  if (market === 'qatar') return `p2p:${kind}`;
   return `p2p:${market}:${kind}`;
-}
-
-function isProductionEnv(env: ProviderEnv): boolean {
-  return (env.APP_ENV || 'production').trim().toLowerCase() === 'production';
 }
 
 function hasLiveProvider(env: ProviderEnv): boolean {
   return Boolean(env.P2P_LIVE_PROVIDER_URL);
-}
-
-function createSeededRandom(seed: number): () => number {
-  let state = seed;
-  return () => {
-    state = (state * 1664525 + 1013904223) & 0x7fffffff;
-    return state / 0x7fffffff;
-  };
-}
-
-const MARKET_CONFIG: Record<P2PMarket, { baseSell: number; spread: number; currencyMethods: string[]; names: string[] }> = {
-  qatar: {
-    baseSell: 3.79,
-    spread: 0.06,
-    currencyMethods: ['QNB', 'QIB', 'Bank Transfer', 'CB Pay', 'Cash'],
-    names: ['DohaDesk', 'QatarFlow', 'CapitalLink', 'QatarOTC', 'MENA-X'],
-  },
-  uae: {
-    baseSell: 3.68,
-    spread: 0.05,
-    currencyMethods: ['Emirates NBD', 'FAB', 'DIB', 'Bank Transfer', 'Cash'],
-    names: ['DubaiOTC', 'AbuDhabiDesk', 'GulfBridge', 'DXBTrader', 'EmiratesFlow'],
-  },
-  egypt: {
-    baseSell: 49.6,
-    spread: 1.1,
-    currencyMethods: ['InstaPay', 'Banque Misr', 'CIB', 'Vodafone Cash', 'Bank Transfer'],
-    names: ['CairoOTC', 'NileFlow', 'AlexDesk', 'GizaTrader', 'MasrLink'],
-  },
-};
-
-function generateOffers(seed: number, side: 'sell' | 'buy', basePrice: number, market: P2PMarket) {
-  const rng = createSeededRandom(seed);
-  const config = MARKET_CONFIG[market];
-  return Array.from({ length: 10 }, (_, index) => {
-    const spreadFactor = market === 'egypt' ? 0.7 : 0.03;
-    const offset = rng() * spreadFactor;
-    const price = side === 'sell' ? basePrice + offset : Math.max(0, basePrice - offset);
-    return {
-      price: Math.round(price * 100) / 100,
-      min: Math.round((100 + rng() * 5000) / 10) * 10,
-      max: Math.round((3000 + rng() * 75000) / 100) * 100,
-      nick: `${config.names[index % config.names.length]}-${index + 1}`,
-      methods: [config.currencyMethods[index % config.currencyMethods.length]],
-      available: Math.round((500 + rng() * 10000) * 100) / 100,
-    };
-  }).sort((a, b) => side === 'sell' ? b.price - a.price : a.price - b.price);
-}
-
-function buildSyntheticSnapshot(now: number, market: P2PMarket): P2PSnapshot {
-  const bucket = Math.floor(now / (5 * 60 * 1000));
-  const rng = createSeededRandom(bucket + market.charCodeAt(0));
-  const config = MARKET_CONFIG[market];
-  const sellBase = config.baseSell + Math.sin(bucket / 18) * (market === 'egypt' ? 0.25 : 0.03) + (rng() - 0.5) * (market === 'egypt' ? 0.2 : 0.02);
-  const buyBase = sellBase - config.spread - rng() * (market === 'egypt' ? 0.4 : 0.02);
-  const sellOffers = generateOffers(bucket, 'sell', sellBase, market);
-  const buyOffers = generateOffers(bucket + 7, 'buy', buyBase, market);
-  const topSell = sellOffers.slice(0, 5);
-  const topBuy = buyOffers.slice(0, 5);
-  const sellAvg = topSell.reduce((sum, offer) => sum + offer.price, 0) / topSell.length;
-  const buyAvg = topBuy.reduce((sum, offer) => sum + offer.price, 0) / topBuy.length;
-  const spread = sellAvg - buyAvg;
-  const fetchedAt = new Date(now).toISOString();
-
-  return {
-    market,
-    source: 'synthetic',
-    fetchedAt,
-    stale: false,
-    status: 'ok',
-    latencyMs: 0,
-    retryCount: 0,
-    ts: now,
-    sellAvg: Math.round(sellAvg * 1000) / 1000,
-    buyAvg: Math.round(buyAvg * 1000) / 1000,
-    bestSell: sellOffers[0]?.price ?? null,
-    bestBuy: buyOffers[0]?.price ?? null,
-    sellDepth: Math.round(topSell.reduce((sum, offer) => sum + offer.available, 0)),
-    buyDepth: Math.round(topBuy.reduce((sum, offer) => sum + offer.available, 0)),
-    spread: Math.round(spread * 1000) / 1000,
-    spreadPct: buyAvg > 0 ? Math.round(((spread / buyAvg) * 100) * 1000) / 1000 : null,
-    sellOffers,
-    buyOffers,
-  };
 }
 
 function toHistoryPoint(snapshot: P2PSnapshot): P2PHistoryPoint {
@@ -124,6 +37,30 @@ function toHistoryPoint(snapshot: P2PSnapshot): P2PHistoryPoint {
   };
 }
 
+function createUnavailableSnapshot(market: P2PMarket, reason: string, retryCount = 0): P2PSnapshot {
+  return {
+    ts: Date.now(),
+    market,
+    source: 'unavailable',
+    fetchedAt: new Date().toISOString(),
+    stale: false,
+    status: 'unavailable',
+    unavailableReason: reason,
+    latencyMs: 0,
+    retryCount,
+    sellAvg: null,
+    buyAvg: null,
+    bestSell: null,
+    bestBuy: null,
+    sellDepth: 0,
+    buyDepth: 0,
+    spread: null,
+    spreadPct: null,
+    sellOffers: [],
+    buyOffers: [],
+  };
+}
+
 async function getHistoryFromKV(env: ProviderEnv, market: P2PMarket): Promise<P2PHistoryPoint[]> {
   const history = await env.P2P_KV.get(kvKey(market, 'history'), 'json');
   return Array.isArray(history) ? history as P2PHistoryPoint[] : [];
@@ -134,12 +71,16 @@ async function getSnapshotFromKV(env: ProviderEnv, market: P2PMarket): Promise<P
 }
 
 async function persistSnapshot(env: ProviderEnv, snapshot: P2PSnapshot): Promise<P2PHistoryPoint[]> {
-  const history = await getHistoryFromKV(env, snapshot.market);
-  const nextHistory = [...history, toHistoryPoint(snapshot)].slice(-TRACKER_HISTORY_LIMIT);
+  const existingHistory = await getHistoryFromKV(env, snapshot.market);
+  const nextHistory = snapshot.source === 'live'
+    ? [...existingHistory, toHistoryPoint(snapshot)].slice(-TRACKER_HISTORY_LIMIT)
+    : existingHistory;
+
   await Promise.all([
     env.P2P_KV.put(kvKey(snapshot.market, 'latest'), JSON.stringify(snapshot)),
     env.P2P_KV.put(kvKey(snapshot.market, 'history'), JSON.stringify(nextHistory)),
   ]);
+
   return nextHistory;
 }
 
@@ -154,6 +95,10 @@ function staleSnapshot(snapshot: P2PSnapshot, retryCount: number): P2PSnapshot {
 
 async function delay(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertLivePayload(market: P2PMarket, payload: unknown): asserts payload is Omit<P2PSnapshot, 'market' | 'source' | 'fetchedAt' | 'stale' | 'status'> & Partial<P2PSnapshot> {
+  if (!payload || typeof payload !== 'object') throw new Error(`Live provider returned invalid payload for ${market}`);
 }
 
 async function fetchLiveSnapshot(market: P2PMarket, env: ProviderEnv): Promise<P2PSnapshot> {
@@ -175,22 +120,22 @@ async function fetchLiveSnapshot(market: P2PMarket, env: ProviderEnv): Promise<P
       if (!response.ok) {
         throw new Error(`Live provider request failed with ${response.status}`);
       }
-      const payload = await response.json() as Omit<P2PSnapshot, 'market' | 'source' | 'fetchedAt' | 'stale' | 'status'> & Partial<P2PSnapshot>;
+      const payload = await response.json();
+      assertLivePayload(market, payload);
       return {
-        ...payload,
+        ...(payload as object),
         market,
         source: 'live',
-        fetchedAt: payload.fetchedAt || new Date().toISOString(),
+        fetchedAt: typeof payload.fetchedAt === 'string' ? payload.fetchedAt : new Date().toISOString(),
         stale: false,
         status: 'ok',
+        unavailableReason: null,
         latencyMs: Date.now() - startedAt,
         retryCount: attempt,
       } as P2PSnapshot;
     } catch (error) {
       lastError = error;
-      if (attempt < LIVE_MAX_RETRIES) {
-        await delay(LIVE_BACKOFF_MS * (attempt + 1));
-      }
+      if (attempt < LIVE_MAX_RETRIES) await delay(LIVE_BACKOFF_MS * (attempt + 1));
     } finally {
       clearTimeout(timeout);
     }
@@ -202,9 +147,7 @@ export async function refreshP2PMarketSnapshot(marketInput: string, env: Provide
   const market = normalizeMarketId(marketInput);
   const snapshot = hasLiveProvider(env)
     ? await fetchLiveSnapshot(market, env)
-    : isProductionEnv(env)
-      ? (() => { throw new Error('Live P2P market data is not configured for this environment'); })()
-      : buildSyntheticSnapshot(Date.now(), market);
+    : createUnavailableSnapshot(market, 'live_provider_unconfigured');
   const history = await persistSnapshot(env, snapshot);
   return { snapshot, history };
 }
@@ -213,9 +156,6 @@ export async function getP2PSnapshot(marketInput: string | undefined, env: Provi
   const market = normalizeMarketId(marketInput);
   const cached = await getSnapshotFromKV(env, market);
   if (cached) return cached;
-  if (!hasLiveProvider(env) && isProductionEnv(env)) {
-    throw new Error('Live P2P market data is not configured for this environment');
-  }
   const { snapshot } = await refreshP2PMarketSnapshot(market, env);
   return snapshot;
 }
@@ -224,24 +164,20 @@ export async function getP2PHistory(marketInput: string | undefined, env: Provid
   const market = normalizeMarketId(marketInput);
   const history = await getHistoryFromKV(env, market);
   if (history.length > 0) return history;
-  await getP2PSnapshot(market, env);
-  return await getHistoryFromKV(env, market);
+  const snapshot = await getP2PSnapshot(market, env);
+  return snapshot.source === 'live' ? await getHistoryFromKV(env, market) : [];
 }
 
 export async function getP2PSnapshotWithFallback(marketInput: string | undefined, env: ProviderEnv): Promise<P2PSnapshot> {
   const market = normalizeMarketId(marketInput);
   try {
-    if (hasLiveProvider(env)) {
-      const { snapshot } = await refreshP2PMarketSnapshot(market, env);
-      return snapshot;
-    }
-    return await getP2PSnapshot(market, env);
+    return hasLiveProvider(env)
+      ? (await refreshP2PMarketSnapshot(market, env)).snapshot
+      : await getP2PSnapshot(market, env);
   } catch (error) {
     const cached = await getSnapshotFromKV(env, market);
-    if (cached) {
-      return staleSnapshot(cached, LIVE_MAX_RETRIES);
-    }
-    throw error;
+    if (cached?.source === 'live') return staleSnapshot(cached, LIVE_MAX_RETRIES);
+    return createUnavailableSnapshot(market, error instanceof Error ? error.message : 'live_provider_unavailable', LIVE_MAX_RETRIES);
   }
 }
 
