@@ -1,0 +1,407 @@
+# Merchant Lovable MD
+
+## Purpose
+This document explains the merchant trading domain, business rules, and functional flows implemented in this repository so the same logic can be rebuilt in another application without depending on the current UI code.
+
+It is written as a product/engineering handoff for another app team.
+
+---
+
+## 1. Core business concept
+The merchant module models collaboration between merchants around commercial agreements and orders.
+
+The system separates three layers:
+
+1. **Agreement templates**
+   - Reusable financial rule definitions.
+   - Examples: profit share, fixed margin, spread, commission, custom.
+   - Owned and versioned by the merchant creating them.
+
+2. **Merchant agreements**
+   - Merchant-specific instances created from a template.
+   - Represent the actual commercial agreement between the current merchant and a selected counterparty/merchant.
+   - Must be approved before they can be used for live orders.
+   - Preserve a resolved terms snapshot and their own version number.
+
+3. **Orders**
+   - Transaction records created against an approved merchant agreement.
+   - Freeze the agreement economics into an immutable `agreementSnapshot` at order creation time.
+   - Store a precomputed `computedNetProfit` so historical economics do not change when templates or agreements later change.
+
+This separation is the key portability rule for another app:
+
+> Never calculate historical order economics from the latest template/agreement record at read time. Always store and use a frozen snapshot on the order itself.
+
+---
+
+## 2. Main domain entities
+
+### 2.1 Agreement Template
+A template defines reusable financial terms.
+
+Important fields:
+- `id`
+- `name`
+- `agreementType`
+- `calculationMethod`
+- `calculationConfig`
+- `defaultCurrency`
+- `notes`
+- `createdByUserId`
+- `version`
+- `isActive`
+- timestamps
+
+### 2.2 Merchant Agreement
+A merchant agreement is a merchant-specific contract derived from a template.
+
+Important fields:
+- `id`
+- `templateId`
+- `merchantId`
+- `merchantName`
+- `agreementType`
+- `title`
+- `status`: `pending | approved | rejected | archived`
+- `approvedByUserId`
+- `approvedAt`
+- `resolvedTermsSnapshot`
+- `version`
+- `isActive`
+- timestamps
+
+### 2.3 Order
+An order is the operational transaction record.
+
+Important fields:
+- `id`
+- `direction`: `incoming | outgoing`
+- `merchantId`
+- `merchantName`
+- `buyerId`
+- `buyerName`
+- `merchantAgreementId`
+- `agreementTemplateId`
+- `agreementType`
+- `agreementSnapshot`
+- `quantity`
+- `unitPrice`
+- `totalAmount`
+- `currency`
+- `computedNetProfit`
+- `status`: `draft | confirmed | cancelled | archived`
+- `createdByUserId`
+- timestamps
+
+---
+
+## 3. Agreement types and profit logic
+The supported agreement types are:
+- `profit_share`
+- `fixed_margin`
+- `spread`
+- `commission`
+- `custom`
+
+### 3.1 Calculation behavior
+Given:
+- `quantity`
+- `unitPrice`
+- `total = quantity * unitPrice`
+
+Net profit is calculated as follows:
+
+#### Profit share
+- Formula: `total * (profitSharePercent / 100)`
+
+#### Fixed margin
+- Formula: `quantity * fixedMarginAmount`
+
+#### Spread
+- Formula: `total * (spreadPercent / 100)`
+
+#### Commission
+- Formula: `total * (commissionPercent / 100)`
+
+#### Custom
+- Formula: `sum(fixedValues) + total * (sum(percentages) / 100)`
+
+### 3.2 Rounding rule
+Money values are rounded to 2 decimal places.
+
+### 3.3 Portability rule
+When rebuilding in another app:
+- implement profit logic in a standalone service/module
+- keep the function pure
+- feed it only the frozen order snapshot and order commercial inputs
+- do not rehydrate from live template/agreement state for historical orders
+
+---
+
+## 4. Versioning and immutability rules
+
+### 4.1 Template versioning
+If a template is already used by one or more merchant agreements and its economic config changes, the system should create a **new template version** instead of mutating the economic meaning of the original one.
+
+### 4.2 Merchant agreement versioning
+If a merchant agreement is already referenced by orders and the economic terms change, the system should create a **new merchant agreement version** rather than mutate the original agreement used by historical orders.
+
+### 4.3 Order immutability
+Once an order is created:
+- its `agreementSnapshot` should remain fixed
+- its `computedNetProfit` should remain fixed unless the order itself is intentionally edited/recomputed according to app policy
+- later changes to templates/agreements must not retroactively change historical records
+
+---
+
+## 5. Approval and status rules
+
+### 5.1 Merchant agreement lifecycle
+Typical lifecycle:
+1. Created as `pending`
+2. Approved -> `approved`
+3. Rejected -> `rejected`
+4. Archived when deprecated or no longer active -> `archived`
+
+### 5.2 Order creation constraint
+Only agreements that are both:
+- `approved`
+- `isActive = true`
+
+can be used to create orders.
+
+### 5.3 Merchant ownership constraint
+The selected merchant agreement must belong to the merchant chosen on the order form.
+If `agreement.merchantId !== draft.merchantId`, order creation must fail.
+
+### 5.4 Deletion/archive rules for agreements
+Merchant agreements follow this rule:
+- if never used by any order -> can be permanently deleted
+- if already used by at least one order -> must be archived, not deleted
+
+This protects historical references.
+
+### 5.5 Order deletion rule
+Orders can only be hard-deleted while still in `draft`.
+Non-draft orders should be cancelled/archived instead of deleted.
+
+---
+
+## 6. Functional workflows
+
+### 6.1 Template management workflow
+1. Merchant creates a template.
+2. Template becomes available in the template library.
+3. Merchant can update template metadata freely.
+4. If economic config changes and template is already in use, create a new template version.
+5. Template can be archived (`isActive = false`) to stop future use.
+
+### 6.2 Merchant agreement workflow
+1. User selects a template.
+2. User creates a merchant agreement for a specific merchant/counterparty.
+3. System generates a `resolvedTermsSnapshot` combining the template economics and any agreement-level overrides.
+4. Agreement starts as `pending`.
+5. Agreement is approved/rejected.
+6. Approved active agreements become selectable in order creation.
+7. If economics are changed after usage by orders, create a new agreement version.
+8. If removal is requested, archive if referenced by orders; otherwise delete.
+
+### 6.3 Order creation workflow
+1. User chooses direction (`incoming` or `outgoing`).
+2. User selects merchant.
+3. App fetches approved active agreements for that merchant.
+4. User selects a merchant agreement.
+5. User enters quantity, unit price, buyer, currency.
+6. App validates:
+   - agreement exists
+   - agreement is approved
+   - agreement is active
+   - agreement belongs to selected merchant
+7. App creates `agreementSnapshot` from the selected agreement.
+8. App computes:
+   - `totalAmount = quantity * unitPrice`
+   - `computedNetProfit` using the frozen snapshot
+9. App stores the order.
+
+### 6.4 Merchant hub workflow
+The merchant hub is a combined operator surface for:
+- relationship selection
+- invite/search actions
+- approval counts
+- agreement management
+- agreement analytics
+- embedded relationship workspace
+- recent messaging/inbox context
+
+Conceptually, another app does not need the same UI, but it should support the same capabilities:
+- browse merchant relationships
+- see pending approvals
+- manage merchant agreements
+- review analytics derived from agreements/orders
+- message counterparties / view relationship context
+
+---
+
+## 7. API behavior to reproduce
+
+### 7.1 Agreement templates
+Recommended endpoints:
+- `GET /agreement-templates`
+- `GET /agreement-templates/:id`
+- `POST /agreement-templates`
+- `PATCH /agreement-templates/:id`
+- `POST /agreement-templates/:id/archive`
+
+Behavior:
+- create templates with version 1
+- if economic config changes on an in-use template, fork/version it
+- archive instead of hard-removing in normal workflows
+
+### 7.2 Merchant agreements
+Recommended endpoints:
+- `GET /merchant-agreements`
+- `GET /merchant-agreements/approved?merchantId=...`
+- `GET /merchant-agreements/:id`
+- `POST /merchant-agreements`
+- `POST /merchant-agreements/:id/submit`
+- `POST /merchant-agreements/:id/approve`
+- `POST /merchant-agreements/:id/reject`
+- `DELETE /merchant-agreements/:id`
+- `POST /merchant-agreements/:id/archive`
+
+Behavior:
+- create as `pending`
+- approve/reject explicitly
+- return only approved active records for order entry
+- archive instead of delete when referenced by orders
+
+### 7.3 Orders
+Recommended endpoints:
+- `GET /orders`
+- `GET /orders/incoming`
+- `GET /orders/outgoing`
+- `GET /orders/:id`
+- `POST /orders`
+- `PATCH /orders/:id`
+- `DELETE /orders/:id`
+- `POST /orders/:id/cancel`
+
+Behavior:
+- validate agreement status and merchant ownership on create
+- store frozen agreement snapshot
+- compute and persist net profit at create time
+- allow hard delete only for drafts
+- use cancel/archive for non-draft records
+
+---
+
+## 8. UI/UX rules that matter to the business logic
+When implementing another app, the exact component layout can change, but these business-visible behaviors should remain:
+
+1. **Merchant selection filters agreements**
+   - show only approved active agreements for the selected merchant in order entry
+
+2. **Agreement type is derived from selected merchant agreement**
+   - avoid letting users mismatch merchant and agreement
+
+3. **Editing economics after order usage creates new versions**
+   - do not silently mutate active historical economics
+
+4. **Deletion actions should explain archive fallback**
+   - if an agreement is already used, users should understand it is archived for audit safety rather than removed
+
+5. **Analytics can be computed from agreements/orders**
+   - total deployed
+   - active exposure
+   - realized profit
+   - pending approvals
+   - deal/agreement mix
+   - relationship counts
+
+6. **Relationship context matters**
+   - merchant trading is not only orders; it is also tied to counterparties, approvals, invites, and messaging
+
+---
+
+## 9. Suggested architecture for another app
+
+### 9.1 Domain modules
+Split the logic into these modules:
+- `agreement-template service`
+- `merchant-agreement service`
+- `order service`
+- `profit calculation service`
+- `analytics projection service`
+- `relationship/invite/approval service`
+
+### 9.2 Persistence recommendations
+Use separate tables/collections for:
+- agreement templates
+- merchant agreements
+- orders
+- approvals
+- relationships
+- messages/invites
+
+Keep snapshots embedded on orders even if you also normalize upstream tables.
+
+### 9.3 Event recommendations
+Useful domain events:
+- template_created
+- template_versioned
+- agreement_created
+- agreement_approved
+- agreement_rejected
+- agreement_archived
+- order_created
+- order_cancelled
+- invite_sent
+- invite_accepted
+- approval_updated
+- message_created
+
+These events help rebuild analytics or sync another app.
+
+---
+
+## 10. Validation checklist for another implementation
+A second app is functionally equivalent if all of these are true:
+
+- [ ] Templates support the same agreement types
+- [ ] Merchant agreements are derived from templates
+- [ ] Orders cannot use unapproved or inactive agreements
+- [ ] Orders store frozen agreement snapshots
+- [ ] Net profit is computed from the frozen snapshot
+- [ ] Used agreements are archived instead of deleted
+- [ ] Economic changes after usage create new versions
+- [ ] Merchant-specific agreement filtering exists in order entry
+- [ ] Relationship/invite/approval context is available around merchant trading
+- [ ] Analytics can be derived without mutating historical records
+
+---
+
+## 11. Migration guidance for another app
+If rebuilding in another app from legacy deal data:
+
+1. Convert reusable deal economics into templates.
+2. Convert merchant-specific negotiated terms into merchant agreements.
+3. For each historical deal/order:
+   - create or map the matching merchant agreement
+   - freeze the resolved agreement economics into an order snapshot
+   - compute and store net profit on the migrated order
+4. Mark migrated agreements/templates with explicit version metadata.
+5. Prefer archive semantics over destructive deletion for referenced records.
+
+---
+
+## 12. Non-negotiable business rules summary
+If only a few rules are implemented, these are the most important:
+
+1. **Approved active agreements only** can create orders.
+2. **Merchant agreement must belong to the selected merchant**.
+3. **Orders freeze economics via a snapshot**.
+4. **Historical profitability must not change after agreement/template edits**.
+5. **Referenced agreements are archived, not deleted**.
+6. **Economic changes after usage create new versions**.
+
+These six rules preserve auditability and business correctness.

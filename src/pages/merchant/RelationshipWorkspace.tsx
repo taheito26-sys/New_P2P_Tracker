@@ -382,7 +382,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
               <Badge variant="outline">{rel.counterparty?.merchant_id || '—'}</Badge>
               <Badge className={dealStatusStyle(rel.status)}>{rel.status}</Badge>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">Relationship-based workspace with deals, approvals, and messages in one place.</p>
+            {!embedded ? <p className="mt-1 text-sm text-muted-foreground">{rel.counterparty?.merchant_id}</p> : null}
           </div>
           <div className={`grid gap-2 ${embedded ? 'min-w-0 grid-cols-2 lg:grid-cols-4' : 'min-w-[220px] grid-cols-2 md:grid-cols-4'}`}>
             <div className="rounded-xl bg-secondary px-2.5 py-2">
@@ -409,7 +409,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Deal flow</h2>
-                <p className="text-xs text-muted-foreground">Review live agreement details directly from this relationship context.</p>
+                {null}
               </div>
               <Button onClick={() => setCreateDealOpen(true)} size="sm" className="gap-1.5">
                 <Plus className="h-3.5 w-3.5" />
@@ -418,6 +418,15 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
             </div>
 
             <div className="space-y-3">
+              {relDeals.length > 0 && (
+                <div className="hidden grid-cols-[minmax(0,2fr)_minmax(120px,0.8fr)_minmax(120px,0.8fr)_minmax(140px,0.9fr)_minmax(220px,1fr)] gap-3 rounded-2xl border border-border/70 bg-muted/20 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
+                <div>Deal</div>
+                <div>Split</div>
+                <div>Exposure</div>
+                <div>State</div>
+                <div>Controls</div>
+              </div>
+              )}
               {relDeals.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
                   {t('noDealsYet')}
@@ -434,7 +443,6 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                 const detailRows = [
                   { label: t('date'), value: formatDealDate(deal, approval?.submitted_at || outgoingApproval?.submitted_at) },
                   { label: 'Deal type', value: DEAL_TYPE_CONFIGS[deal.deal_type]?.label || deal.deal_type },
-                  { label: 'Ratio', value: formatDealRatioLabel(deal) },
                   { label: 'Direction', value: formatDealDirection(deal, userId) },
                   { label: 'Merchant', value: merchantLabel },
                   { label: 'Status', value: deal.status },
@@ -444,54 +452,46 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                 ];
                 return (
                   <article key={deal.id} className={`rounded-2xl border border-border/70 bg-background shadow-sm ${embedded ? 'p-3' : 'p-4'}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(120px,0.8fr)_minmax(120px,0.8fr)_minmax(140px,0.9fr)_minmax(220px,1fr)] lg:items-start">
+                      <div className="space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-lg">{DEAL_TYPE_CONFIGS[deal.deal_type]?.icon || '📄'}</span>
                           <h3 className="text-base font-semibold text-foreground">{deal.title || DEAL_TYPE_CONFIGS[deal.deal_type]?.label || deal.deal_type}</h3>
                           <Badge className={dealStatusStyle(deal.status)}>{deal.status}</Badge>
                         </div>
-                        <p className="mt-1 text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Amount</p>
-                        <p className="text-lg font-semibold text-foreground">${deal.amount.toLocaleString()}</p>
-                        <p className="text-xs text-muted-foreground">{deal.currency}</p>
-                      </div>
-                    </div>
-
-                    <div className={`mt-4 grid gap-3 ${embedded ? 'xl:grid-cols-[minmax(0,1.8fr)_minmax(220px,0.8fr)]' : 'xl:grid-cols-[minmax(0,1.6fr)_minmax(260px,0.9fr)]'}`}>
-                      <div className={`grid gap-2 ${embedded ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-2 xl:grid-cols-3'}`}>
-                        {detailRows.map((detail) => (
-                          <div key={`${deal.id}-${detail.label}`} className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
-                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.label}</p>
-                            <p className="mt-1 text-sm font-medium text-foreground">{detail.value}</p>
+                        <p className="text-sm text-muted-foreground">{approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {detailRows.map((detail) => (
+                            <div key={`${deal.id}-${detail.label}`} className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
+                              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.label}</p>
+                              <p className="mt-1 text-sm font-medium text-foreground">{detail.value}</p>
+                            </div>
+                          ))}
+                          <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('buyer')}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{buyer || 'Not set'}</p>
                           </div>
-                        ))}
-                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('buyer')}</p>
-                          <p className="mt-1 text-sm font-medium text-foreground">{buyer || 'Not set'}</p>
+                          <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('price')}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{price != null ? `$${price.toLocaleString()}` : 'Not set'}</p>
+                          </div>
                         </div>
-                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('price')}</p>
-                          <p className="mt-1 text-sm font-medium text-foreground">{price != null ? `$${price.toLocaleString()}` : 'Not set'}</p>
-                        </div>
-                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
-                          <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(outstanding.outstanding)}</p>
-                        </div>
-                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('price')}</p>
-                          <p className="mt-1 text-sm font-medium text-foreground">{price != null ? `$${price.toLocaleString()}` : 'Not set'}</p>
-                        </div>
-                        <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
-                          <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(outstanding.outstanding)}</p>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
                       </div>
 
-                      <div className={`rounded-2xl border border-border/70 bg-muted/20 ${embedded ? 'p-3' : 'p-4'}`}>
+                      <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ratio</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{formatDealRatioLabel(deal)}</p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outstanding</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{formatCurrencyValue(outstanding.outstanding)}</p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{deal.status}</p>
+                      </div>
+
+                      <div className="rounded-2xl border border-border/70 bg-muted/20 p-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</p>
                         <div className="mt-3 flex flex-col gap-2">
                           {approval ? (
@@ -506,7 +506,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                               <Button size="sm" variant="secondary" className="justify-center" onClick={() => openRejectProposal(approval.id, deal)}>
                                 Reject, modify, and send back
                               </Button>
-                              <p className="text-xs text-muted-foreground">Incoming pending deal · {approvalSummaryLabel(approval)}</p>
+                              <p className="text-xs text-muted-foreground">{approvalSummaryLabel(approval)}</p>
                             </>
                           ) : outgoingApproval ? (
                             <div className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-700">
@@ -519,10 +519,10 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                                 <DollarSign className="h-3.5 w-3.5" />
                                 {t('settle')}
                               </Button>
-                              <p className="text-xs text-muted-foreground">Approved deals can be settled from this workspace.</p>
+                              {null}
                             </>
                           ) : (
-                            <p className="text-xs text-muted-foreground">No actions are currently available for this deal.</p>
+                            <p className="text-xs text-muted-foreground">—</p>
                           )}
                         </div>
                       </div>
@@ -533,12 +533,11 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
             </div>
           </section>
 
-          <aside className="flex min-h-[420px] flex-col rounded-2xl border border-border/70 bg-muted/20">
+          {!embedded && <aside className="flex min-h-[420px] flex-col rounded-2xl border border-border/70 bg-muted/20">
             <div className="border-b border-border px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-foreground">Inbox & messaging</h2>
-                  <p className="text-xs text-muted-foreground">Conversation and action context stay attached to this merchant relationship.</p>
+                  <h2 className="text-sm font-semibold text-foreground">Inbox</h2>
                 </div>
                 <div className="inline-flex items-center gap-1 rounded-full bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
                   <MessageCircle className="h-3.5 w-3.5" />
@@ -612,7 +611,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                 </div>
               </div>
             </div>
-          </aside>
+          </aside>}
         </div>
       </div>
 
