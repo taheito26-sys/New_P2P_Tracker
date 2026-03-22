@@ -21,10 +21,6 @@ function pathToCrumbs(pathname: string, counterpartyName?: string): Crumb[] {
     if (pathname.includes('/stock')) crumbs.push({ label: 'Stock' });
     if (pathname.includes('/calendar')) crumbs.push({ label: 'Calendar' });
     if (pathname.includes('/p2p')) crumbs.push({ label: 'P2P Tracker' });
-  } else if (pathname === '/deals') {
-    crumbs.push({ label: 'Deals' });
-  } else if (pathname === '/analytics') {
-    crumbs.push({ label: 'Analytics' });
   } else if (pathname === '/vault') {
     crumbs.push({ label: 'Vault' });
   } else if (pathname === '/audit') {

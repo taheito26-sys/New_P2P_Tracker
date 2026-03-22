@@ -85,9 +85,9 @@ describe('NetworkPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/workspace focus/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /workspace/i })).toBeInTheDocument();
     expect(screen.getByText(/relationship switcher/i)).toBeInTheDocument();
-    expect(await screen.findByText(/workspace could not be displayed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/workspace unavailable/i)).toBeInTheDocument();
   });
 
   it('stops showing the loading spinner when a relationship message summary request hangs', async () => {
@@ -106,6 +106,6 @@ describe('NetworkPage', () => {
       await vi.advanceTimersByTimeAsync(4500);
     });
 
-    expect(screen.getByText(/workspace could not be displayed/i)).toBeInTheDocument();
+    expect(screen.getByText(/workspace unavailable/i)).toBeInTheDocument();
   });
 });

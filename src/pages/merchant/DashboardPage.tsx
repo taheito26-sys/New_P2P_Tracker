@@ -196,7 +196,7 @@ function DashboardPageWorkspace() {
 
       {/* ── Merchant Deal KPIs ── */}
       <div className="kpis" style={{ marginTop: 0 }}>
-        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/deals')}>
+        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/network')}>
           <div className="kpi-head">
             <span className="kpi-badge" style={{ color: 'var(--brand)', borderColor: 'color-mix(in srgb,var(--brand) 30%,transparent)', background: 'var(--brand3)' }}>🤝</span>
           </div>
@@ -212,7 +212,7 @@ function DashboardPageWorkspace() {
           <div className={`kpi-val ${pendingApprovals.length > 0 ? 'bad' : 'good'}`}>{pendingApprovals.length}</div>
           <div className="kpi-sub">{pendingApprovals.length > 0 ? t('actionNeeded') : t('allClear')}</div>
         </div>
-        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/deals')}>
+        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/network')}>
           <div className="kpi-head">
             <span className="kpi-badge" style={{ color: 'var(--t5)', borderColor: 'color-mix(in srgb,var(--t5) 30%,transparent)', background: 'color-mix(in srgb,var(--t5) 10%,transparent)' }}>💰</span>
           </div>
@@ -220,7 +220,7 @@ function DashboardPageWorkspace() {
           <div className="kpi-val" style={{ fontSize: 17 }}>${merchantExposure.toLocaleString()}</div>
           <div className="kpi-sub">{activeDeals.length} {t('activeDeals')}</div>
         </div>
-        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/analytics')}>
+        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/network')}>
           <div className="kpi-head">
             <span className="kpi-badge" style={badgeStyle(merchantPnL >= 0 ? 'good' : 'bad')}>P&L</span>
           </div>
