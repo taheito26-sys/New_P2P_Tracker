@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OrdersPage from '@/pages/trading/OrdersPage';
-import DealsPage from '@/pages/merchant/DealsPage';
 import NetworkPage from '@/pages/merchant/NetworkPage';
+import DealsPage from '@/pages/merchant/DealsPage';
+import AnalyticsPage from '@/pages/merchant/AnalyticsPage';
 import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
@@ -107,12 +108,13 @@ describe('layout preservation', () => {
     expect((agreementTypeSelect as HTMLSelectElement).value).toBe('mag-2');
   });
 
-  it('keeps Deals page table layout and action columns', async () => {
-    render(<DealsPage />);
-    expect((await screen.findAllByRole('columnheader', { name: /deal/i })).length).toBeGreaterThan(0);
-    expect(screen.getByRole('columnheader', { name: /status/i })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: /merchant/i })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: /actions/i })).toBeInTheDocument();
+
+  it('keeps Deals and Analytics route wrappers available', async () => {
+    render(<MemoryRouter><DealsPage /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: /dealsLabel/i })).toBeInTheDocument();
+
+    render(<MemoryRouter><AnalyticsPage /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: /analyticsTitle/i })).toBeInTheDocument();
   });
 
   it('leaves Network page layout available', async () => {

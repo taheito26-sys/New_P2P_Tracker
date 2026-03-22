@@ -4,7 +4,7 @@ import * as api from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useT } from '@/lib/i18n';
 import { useRealtimeRefresh } from '@/hooks/use-realtime';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -30,20 +30,16 @@ type ConversationSummary = {
   pendingOutgoingApprovals: number;
 };
 
-type MerchantHubPageProps = {
-  entry?: 'network' | 'deals' | 'analytics';
-};
-
 class NetworkWorkspaceBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false };
   }
   static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: unknown) { console.error('[MerchantHubPage] workspace crashed', error); }
+  componentDidCatch(error: unknown) { console.error('[NetworkPage] workspace crashed', error); }
   render() {
     if (this.state.hasError) {
-      return <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-destructive/30 bg-destructive/5 px-6 text-center text-sm text-muted-foreground">The relationship workspace could not be displayed. Refresh the page or reopen this relationship.</div>;
+      return <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-destructive/30 bg-destructive/5 px-6 text-center text-sm text-muted-foreground">Workspace unavailable</div>;
     }
     return this.props.children;
   }
@@ -64,26 +60,29 @@ function callOrResolve<T>(fn: (() => Promise<T>) | undefined, fallback: T): Prom
   return fn ? fn() : Promise.resolve(fallback);
 }
 
-export default function MerchantHubPage({ entry = 'network' }: MerchantHubPageProps) {
+type MerchantHubEntry = 'network' | 'deals' | 'analytics';
+
+export default function MerchantHubPage({ entry = 'network' }: { entry?: MerchantHubEntry }) {
   const inRouterContext = useInRouterContext();
 
   if (inRouterContext) {
-    return <MerchantHubPageWithRouter entry={entry} />;
+    return <NetworkPageWithRouter entry={entry} />;
   }
 
-  return <MerchantHubPageContent entry={entry} searchParams={new URLSearchParams()} setSearchParams={() => undefined} />;
+  return <NetworkPageContent entry={entry} searchParams={new URLSearchParams()} setSearchParams={() => undefined} />;
 }
 
-function MerchantHubPageWithRouter({ entry }: MerchantHubPageProps) {
+function NetworkPageWithRouter({ entry }: { entry: MerchantHubEntry }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  return <MerchantHubPageContent entry={entry} searchParams={searchParams} setSearchParams={setSearchParams} />;
+  return <NetworkPageContent entry={entry} searchParams={searchParams} setSearchParams={setSearchParams} />;
 }
 
-function MerchantHubPageContent({
-  entry = 'network',
+function NetworkPageContent({
+  entry,
   searchParams,
   setSearchParams,
-}: MerchantHubPageProps & {
+}: {
+  entry: MerchantHubEntry;
   searchParams: URLSearchParams;
   setSearchParams: (next: URLSearchParams) => void;
 }) {
@@ -324,23 +323,11 @@ function MerchantHubPageContent({
 
   return (
     <div className="space-y-4 px-2 pb-4 md:px-3" dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={entry === 'network' ? t('networkTitle') : entry === 'analytics' ? t('analyticsTitle') : 'Merchant hub'} description="Network, analytics, and deals now live together in one workspace with a floating inbox." />
+      <PageHeader title={entry === 'analytics' ? t('analyticsTitle') : entry === 'deals' ? t('dealsLabel') : t('networkTitle')} />
 
       <section className="rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
-          {[
-            { key: 'network', label: 'Network' },
-            { key: 'analytics', label: 'Analytics' },
-            { key: 'deals', label: 'Deals' },
-          ].map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${entry === item.key ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-muted/70'}`}
-            >
-              {item.label}
-            </button>
-          ))}
+          <Badge variant="outline">{entry === 'network' ? 'Network' : entry === 'deals' ? 'Deals' : 'Analytics'}</Badge><Badge variant="outline">Analytics</Badge><Badge variant="outline">Deals</Badge>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Badge variant="outline">{relationships.length} relationships</Badge>
             <Badge variant="outline">{activeAnalytics.pendingApprovals} approvals</Badge>
@@ -353,10 +340,7 @@ function MerchantHubPageContent({
         <div className="space-y-4">
           <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="mb-2 flex items-center gap-2"><Briefcase className="h-5 w-5 text-primary" /><h2 className="text-lg font-semibold">Workspace focus</h2></div>
-                <p className="text-sm text-muted-foreground">The core view now combines network, analytics, and deals while pushing inbox into a floating panel.</p>
-              </div>
+              <div className="mb-2 flex items-center gap-2"><Briefcase className="h-5 w-5 text-primary" /><h2 className="text-lg font-semibold">Workspace</h2></div>
               <div className="grid grid-cols-3 gap-2 text-center text-sm">
                 <Stat label="Relationships" value={String(relationships.length)} />
                 <Stat label="Approved" value={String(agreementStats.approved)} />
@@ -369,12 +353,9 @@ function MerchantHubPageContent({
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-primary" />
-                <div>
-                  <h3 className="text-base font-semibold">Analytics overview</h3>
-                  <p className="text-sm text-muted-foreground">Live portfolio signals stay visible beside the relationship workspace.</p>
-                </div>
+                <h3 className="text-base font-semibold">Analytics</h3>
               </div>
-              <Badge variant="outline">{entry === 'analytics' ? 'Analytics focus' : 'Inline analytics'}</Badge>
+              <Badge variant="outline">Analytics</Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <Stat label="Total deployed" value={`$${activeAnalytics.totalDeployed.toLocaleString()}`} />
@@ -396,11 +377,11 @@ function MerchantHubPageContent({
                     <div key={item.name} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
                       <div>
                         <p className="text-sm font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">${item.deployed.toLocaleString()} deployed</p>
+                        <p className="text-xs text-muted-foreground">${item.deployed.toLocaleString()}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-semibold">{item.roi.toFixed(1)}%</p>
-                        <p className="text-xs text-muted-foreground">${item.profit.toLocaleString()} profit</p>
+                        <p className="text-xs text-muted-foreground">${item.profit.toLocaleString()}</p>
                       </div>
                     </div>
                   ))}
@@ -413,7 +394,7 @@ function MerchantHubPageContent({
                     <div key={type} className="rounded-full border border-border/70 px-3 py-1.5 text-sm">
                       {type} <span className="text-muted-foreground">({count})</span>
                     </div>
-                  )) : <p className="text-sm text-muted-foreground">No analytics mix available yet.</p>}
+                  )) : <p className="text-sm text-muted-foreground">—</p>}
                 </div>
               </div>
             </div>
@@ -421,25 +402,19 @@ function MerchantHubPageContent({
 
           <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold">Active merchant relationship</h3>
-                <p className="text-sm text-muted-foreground">Relationship context remains central for live approvals, messages, and negotiation.</p>
-              </div>
+              <h3 className="text-base font-semibold">Relationship</h3>
               {selectedConversation && <div className="flex flex-wrap gap-2"><Badge variant="outline">{selectedConversation.pendingIncomingApprovals} incoming</Badge><Badge variant="outline">{selectedConversation.pendingOutgoingApprovals} outgoing</Badge><Badge variant="outline">{selectedConversation.unreadCount} unread</Badge></div>}
             </div>
             {selectedRelationship ? (
               <NetworkWorkspaceBoundary key={selectedRelationship.id}><RelationshipWorkspace relationshipId={selectedRelationship.id} embedded /></NetworkWorkspaceBoundary>
             ) : (
-              <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-border bg-background px-6 text-center text-sm text-muted-foreground">The relationship workspace could not be displayed. Select or create a merchant relationship, then reopen the workspace.</div>
+              <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-border bg-background px-6 text-center text-sm text-muted-foreground">Workspace unavailable</div>
             )}
           </div>
 
           <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="mb-1 flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /><h3 className="text-base font-semibold">Merchant agreements</h3></div>
-                <p className="text-sm text-muted-foreground">Versioned merchant agreements and templates are now part of the main workspace instead of a separate destination.</p>
-              </div>
+              <div className="mb-1 flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /><h3 className="text-base font-semibold">Deals</h3></div>
               <Badge variant="outline">{agreementStats.templates} templates</Badge>
             </div>
             <div className="overflow-x-auto rounded-xl border border-border/70">
@@ -456,7 +431,7 @@ function MerchantHubPageContent({
                 <tbody>
                   {agreements.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">No merchant agreements available.</td>
+                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">No deals</td>
                     </tr>
                   ) : agreements.map((agreement) => {
                     const template = templates.find((item) => item.id === agreement.templateId);
@@ -485,7 +460,7 @@ function MerchantHubPageContent({
                 const selected = selectedRelationship?.id === item.id;
                 return <button key={item.id} type="button" onClick={() => { const next = new URLSearchParams(searchParams); next.set('relationship', item.id); setSearchParams(next); }} className={`w-full rounded-xl border px-3 py-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border/70 bg-background hover:bg-secondary/60'}`}><div className="font-medium text-sm">{item.counterparty?.display_name || item.counterparty?.nickname || item.id}</div><div className="text-[11px] text-muted-foreground">{conversationMap[item.id]?.latestMessage?.body || 'Open workspace'}</div></button>;
               })}
-              {relationships.length === 0 && <div className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">No relationships yet.</div>}
+              {relationships.length === 0 && <div className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">No relationships</div>}
             </div>
           </div>
 
@@ -495,15 +470,8 @@ function MerchantHubPageContent({
               <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find merchant…" className="h-9 text-sm" />
               <Button type="submit" size="sm" variant="outline">Search</Button>
             </form>
-            {searchOpen && <div className="mt-2 space-y-2">{results.length === 0 && searched ? <p className="text-xs text-muted-foreground">No merchants found.</p> : null}{results.map((result) => <div key={result.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background px-3 py-2"><div className="min-w-0"><p className="truncate text-sm font-medium">{result.display_name}</p><p className="text-[11px] text-muted-foreground">{result.merchant_id}</p></div><Button size="sm" variant="outline" onClick={() => openInviteDialog(result)}><UserPlus className="mr-1 h-3.5 w-3.5" />{t('invite')}</Button></div>)}</div>}
+            {searchOpen && <div className="mt-2 space-y-2">{results.length === 0 && searched ? <p className="text-xs text-muted-foreground">No results</p> : null}{results.map((result) => <div key={result.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background px-3 py-2"><div className="min-w-0"><p className="truncate text-sm font-medium">{result.display_name}</p><p className="text-[11px] text-muted-foreground">{result.merchant_id}</p></div><Button size="sm" variant="outline" onClick={() => openInviteDialog(result)}><UserPlus className="mr-1 h-3.5 w-3.5" />{t('invite')}</Button></div>)}</div>}
           </div>
-
-          {(inbox.filter((invite) => invite.status === 'pending').length > 0 || sentInvites.filter((invite) => invite.status === 'pending').length > 0) && (
-            <div className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 shadow-sm">
-              {inbox.filter((invite) => invite.status === 'pending').length > 0 && <div><p className="text-sm font-semibold text-amber-900">Incoming invites</p><div className="mt-2 space-y-2">{inbox.filter((invite) => invite.status === 'pending').map((invite) => <div key={invite.id} className="rounded-xl bg-background/85 px-3 py-3"><p className="text-sm font-medium text-foreground">{invite.from_display_name || invite.from_merchant_id}</p><p className="mt-1 text-xs text-muted-foreground">{invite.purpose || t('generalCollaboration')} · {t('role')}: {invite.requested_role}</p>{invite.message ? <p className="mt-2 text-xs italic text-muted-foreground">“{invite.message}”</p> : null}<div className="mt-3 flex flex-wrap gap-2"><Button size="sm" onClick={() => handleAcceptInvite(invite)}>{t('accept')}</Button><Button size="sm" variant="outline" onClick={() => handleRejectInvite(invite.id)}>{t('reject')}</Button></div></div>)}</div></div>}
-              {sentInvites.filter((invite) => invite.status === 'pending').length > 0 && <div><p className="text-sm font-semibold text-amber-900">Sent invites</p><div className="mt-2 space-y-2">{sentInvites.filter((invite) => invite.status === 'pending').map((invite) => <div key={invite.id} className="rounded-xl bg-background/85 px-3 py-3"><div className="flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{invite.to_display_name || invite.to_merchant_id}</p><p className="mt-1 text-xs text-muted-foreground">{invite.purpose || t('generalCollaboration')}</p></div><Badge variant="outline">Waiting for recipient</Badge></div><div className="mt-3"><Button size="sm" variant="outline" onClick={() => handleWithdrawInvite(invite.id)}>{t('withdraw')}</Button></div></div>)}</div></div>}
-            </div>
-          )}
         </aside>
       </section>
 
@@ -519,10 +487,7 @@ function MerchantHubPageContent({
 
       <Dialog open={inboxOpen} onOpenChange={setInboxOpen}>
         <DialogContent className="sm:max-w-[540px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Inbox className="h-4 w-4" /> Floating inbox</DialogTitle>
-            <DialogDescription>Open messages, approvals, and invites without leaving the combined command center.</DialogDescription>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Inbox className="h-4 w-4" /> Inbox</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-3 sm:grid-cols-3">
               <Stat label="Unread" value={String(messages.filter((message) => !message.is_read && message.sender_user_id !== userId).length)} />
@@ -535,7 +500,7 @@ function MerchantHubPageContent({
                 <Badge variant="outline">{selectedRelationship?.counterparty?.display_name || 'No relationship selected'}</Badge>
               </div>
               <div className="max-h-[220px] space-y-2 overflow-auto">
-                {messages.length === 0 ? <p className="text-sm text-muted-foreground">No messages yet.</p> : messages.slice(-6).map((message) => (
+                {messages.length === 0 ? <p className="text-sm text-muted-foreground">No messages</p> : messages.slice(-6).map((message) => (
                   <div key={message.id} className="rounded-lg border border-border/60 px-3 py-2">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-medium">{message.sender_name || (message.sender_user_id === userId ? 'You' : selectedRelationship?.counterparty?.display_name) || 'Message'}</p>
@@ -546,7 +511,7 @@ function MerchantHubPageContent({
                 ))}
               </div>
               <div className="mt-3 space-y-2">
-                <Textarea rows={3} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Reply from the floating inbox…" />
+                <Textarea rows={3} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Reply" />
                 <div className="flex justify-end">
                   <Button size="sm" onClick={handleSendMessage} disabled={!selectedRelationship || !messageDraft.trim()} className="gap-1.5">
                     Send <ChevronRight className="h-3.5 w-3.5" />
@@ -558,13 +523,13 @@ function MerchantHubPageContent({
               <div className="rounded-xl border border-border/70 p-3">
                 <h3 className="text-sm font-semibold">Pending invites</h3>
                 <div className="mt-2 space-y-2">
-                  {inbox.filter((invite) => invite.status === 'pending').length === 0 ? <p className="text-sm text-muted-foreground">No inbox invites.</p> : inbox.filter((invite) => invite.status === 'pending').map((invite) => <div key={invite.id} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">{invite.from_display_name || invite.from_merchant_id}</div>)}
+                  {inbox.filter((invite) => invite.status === 'pending').length === 0 ? <p className="text-sm text-muted-foreground">—</p> : inbox.filter((invite) => invite.status === 'pending').map((invite) => <div key={invite.id} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">{invite.from_display_name || invite.from_merchant_id}</div>)}
                 </div>
               </div>
               <div className="rounded-xl border border-border/70 p-3">
                 <h3 className="text-sm font-semibold">Approval queue</h3>
                 <div className="mt-2 space-y-2">
-                  {Object.values(conversationMap).filter((item) => item.pendingIncomingApprovals + item.pendingOutgoingApprovals > 0).length === 0 ? <p className="text-sm text-muted-foreground">No pending approvals.</p> : Object.values(conversationMap).filter((item) => item.pendingIncomingApprovals + item.pendingOutgoingApprovals > 0).map((item) => <div key={item.relationship.id} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">{item.relationship.counterparty?.display_name || item.relationship.id} · {item.pendingIncomingApprovals + item.pendingOutgoingApprovals} pending</div>)}
+                  {Object.values(conversationMap).filter((item) => item.pendingIncomingApprovals + item.pendingOutgoingApprovals > 0).length === 0 ? <p className="text-sm text-muted-foreground">—</p> : Object.values(conversationMap).filter((item) => item.pendingIncomingApprovals + item.pendingOutgoingApprovals > 0).map((item) => <div key={item.relationship.id} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">{item.relationship.counterparty?.display_name || item.relationship.id} · {item.pendingIncomingApprovals + item.pendingOutgoingApprovals} pending</div>)}
                 </div>
               </div>
             </div>
@@ -574,7 +539,7 @@ function MerchantHubPageContent({
 
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{t('sendInviteTo')} {inviteTarget?.display_name}</DialogTitle><DialogDescription>Send a collaboration invitation directly from the merchant hub.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{t('sendInviteTo')} {inviteTarget?.display_name}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2"><Label>{t('purpose')}</Label><Input value={inviteForm.purpose} onChange={(event) => setInviteForm((current) => ({ ...current, purpose: event.target.value }))} placeholder={t('purposePlaceholder')} /></div>
             <div className="space-y-2"><Label>{t('role')}</Label><Input value={inviteForm.role} onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))} /></div>
@@ -586,7 +551,7 @@ function MerchantHubPageContent({
 
       <Dialog open={!!editingAgreement} onOpenChange={(open) => !open && setEditingAgreement(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Edit merchant agreement</DialogTitle><DialogDescription>Keep agreement economics safe while editing in the combined merchant hub.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Edit merchant agreement</DialogTitle></DialogHeader>
           <div className="space-y-3"><label className="text-sm font-medium block">Title<input className="mt-1 w-full rounded-md border px-3 py-2" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label><label className="text-sm font-medium block">Economic value<input className="mt-1 w-full rounded-md border px-3 py-2" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} /></label><label className="text-sm font-medium block">Status<select className="mt-1 w-full rounded-md border px-3 py-2" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}><option value="pending">pending</option><option value="approved">approved</option><option value="rejected">rejected</option><option value="archived">archived</option></select></label></div>
           <DialogFooter><Button variant="outline" onClick={() => setEditingAgreement(null)}>{t('cancel')}</Button><Button onClick={saveAgreement}>{t('saveCorrection')}</Button></DialogFooter>
         </DialogContent>
@@ -594,7 +559,7 @@ function MerchantHubPageContent({
 
       <Dialog open={!!deleteAgreementId} onOpenChange={(open) => !open && setDeleteAgreementId(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{t('delete')}</DialogTitle><DialogDescription>Delete stays easy in the combined merchant hub. Used agreements archive instead of breaking history.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{t('delete')}</DialogTitle></DialogHeader>
           <DialogFooter><Button variant="outline" onClick={() => setDeleteAgreementId(null)}>{t('cancel')}</Button><Button onClick={deleteAgreement}>{t('delete')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>

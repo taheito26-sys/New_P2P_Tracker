@@ -372,7 +372,7 @@ function OrdersPageWorkspace() {
             )}
             <div className="actionsRow" style={{ marginTop: 10 }}>
               <button className="btn" onClick={addTrade}>{t('logSale')}</button>
-              <button className="btn secondary" onClick={() => navigate('/deals')}>{t('dealsLabel')}</button>
+              <button className="btn secondary" onClick={() => navigate('/network')}>{t('dealsLabel')}</button>
             </div>
           </div>
         </div>

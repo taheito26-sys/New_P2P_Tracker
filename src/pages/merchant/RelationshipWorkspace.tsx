@@ -382,7 +382,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
               <Badge variant="outline">{rel.counterparty?.merchant_id || '—'}</Badge>
               <Badge className={dealStatusStyle(rel.status)}>{rel.status}</Badge>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">Relationship-based workspace with deals, approvals, and messages in one place.</p>
+            {!embedded ? <p className="mt-1 text-sm text-muted-foreground">{rel.counterparty?.merchant_id}</p> : null}
           </div>
           <div className={`grid gap-2 ${embedded ? 'min-w-0 grid-cols-2 lg:grid-cols-4' : 'min-w-[220px] grid-cols-2 md:grid-cols-4'}`}>
             <div className="rounded-xl bg-secondary px-2.5 py-2">
@@ -409,7 +409,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Deal flow</h2>
-                <p className="text-xs text-muted-foreground">Review live agreement details directly from this relationship context.</p>
+                {null}
               </div>
               <Button onClick={() => setCreateDealOpen(true)} size="sm" className="gap-1.5">
                 <Plus className="h-3.5 w-3.5" />
@@ -459,7 +459,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                           <h3 className="text-base font-semibold text-foreground">{deal.title || DEAL_TYPE_CONFIGS[deal.deal_type]?.label || deal.deal_type}</h3>
                           <Badge className={dealStatusStyle(deal.status)}>{deal.status}</Badge>
                         </div>
-                        <p className="text-sm text-muted-foreground">{DEAL_TYPE_CONFIGS[deal.deal_type]?.description || approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
+                        <p className="text-sm text-muted-foreground">{approvalSummaryLabel(approval || outgoingApproval || { type: deal.deal_type, target_entity_type: '', target_entity_id: '', id: '', relationship_id: '', proposed_payload: {}, status: 'pending', submitted_by_user_id: '', submitted_by_merchant_id: '', reviewer_user_id: '', resolution_note: null, submitted_at: deal.created_at, resolved_at: null, created_at: deal.created_at, updated_at: deal.updated_at })}</p>
                         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                           {detailRows.map((detail) => (
                             <div key={`${deal.id}-${detail.label}`} className="rounded-xl border border-border/70 bg-secondary/30 px-2.5 py-2">
@@ -506,7 +506,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                               <Button size="sm" variant="secondary" className="justify-center" onClick={() => openRejectProposal(approval.id, deal)}>
                                 Reject, modify, and send back
                               </Button>
-                              <p className="text-xs text-muted-foreground">Incoming pending deal · {approvalSummaryLabel(approval)}</p>
+                              <p className="text-xs text-muted-foreground">{approvalSummaryLabel(approval)}</p>
                             </>
                           ) : outgoingApproval ? (
                             <div className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-700">
@@ -519,10 +519,10 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
                                 <DollarSign className="h-3.5 w-3.5" />
                                 {t('settle')}
                               </Button>
-                              <p className="text-xs text-muted-foreground">Approved deals can be settled from this workspace.</p>
+                              {null}
                             </>
                           ) : (
-                            <p className="text-xs text-muted-foreground">No actions are currently available for this deal.</p>
+                            <p className="text-xs text-muted-foreground">—</p>
                           )}
                         </div>
                       </div>
@@ -537,8 +537,7 @@ export function RelationshipWorkspaceCore({ relationshipId, embedded = false }: 
             <div className="border-b border-border px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-foreground">Inbox & messaging</h2>
-                  <p className="text-xs text-muted-foreground">Conversation and action context stay attached to this merchant relationship.</p>
+                  <h2 className="text-sm font-semibold text-foreground">Inbox</h2>
                 </div>
                 <div className="inline-flex items-center gap-1 rounded-full bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
                   <MessageCircle className="h-3.5 w-3.5" />

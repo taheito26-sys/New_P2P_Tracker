@@ -1,4 +1,4 @@
-import MerchantHubPage from '@/pages/merchant/MerchantHubPage';
+import MerchantHubPage from './MerchantHubPage';
 
 export default function NetworkPage() {
   return <MerchantHubPage entry="network" />;
