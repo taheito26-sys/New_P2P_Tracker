@@ -439,11 +439,9 @@ export default function NetworkPage() {
             </div>
 
             {(inbox.filter((invite) => invite.status === 'pending').length > 0 || sentInvites.filter((invite) => invite.status === 'pending').length > 0) && (
-              <details className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
-                <summary className="cursor-pointer list-none text-sm font-semibold text-foreground">Invite queue</summary>
-                <p className="mt-1 text-xs text-muted-foreground">Secondary controls for discovery and invitations.</p>
+              <div className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
                 {inbox.filter((invite) => invite.status === 'pending').length > 0 && (
-                  <div className="mt-3">
+                  <div>
                     <p className="text-sm font-semibold text-amber-900">Incoming invites</p>
                     <div className="mt-2 space-y-2">
                       {inbox.filter((invite) => invite.status === 'pending').map((invite) => (
@@ -460,8 +458,9 @@ export default function NetworkPage() {
                     </div>
                   </div>
                 )}
+
                 {sentInvites.filter((invite) => invite.status === 'pending').length > 0 && (
-                  <div className="mt-3">
+                  <div>
                     <p className="text-sm font-semibold text-amber-900">Sent invites</p>
                     <div className="mt-2 space-y-2">
                       {sentInvites.filter((invite) => invite.status === 'pending').map((invite) => (
@@ -481,7 +480,7 @@ export default function NetworkPage() {
                     </div>
                   </div>
                 )}
-              </details>
+              </div>
             )}
           </aside>
         </div>
