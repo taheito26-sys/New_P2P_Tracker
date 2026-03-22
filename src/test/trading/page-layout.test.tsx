@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OrdersPage from '@/pages/trading/OrdersPage';
 import NetworkPage from '@/pages/merchant/NetworkPage';
+import DealsPage from '@/pages/merchant/DealsPage';
+import AnalyticsPage from '@/pages/merchant/AnalyticsPage';
 import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
@@ -104,6 +106,15 @@ describe('layout preservation', () => {
 
     fireEvent.change(agreementTypeSelect, { target: { value: 'mag-2' } });
     expect((agreementTypeSelect as HTMLSelectElement).value).toBe('mag-2');
+  });
+
+
+  it('keeps Deals and Analytics route wrappers available', async () => {
+    render(<MemoryRouter><DealsPage /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: /dealsLabel/i })).toBeInTheDocument();
+
+    render(<MemoryRouter><AnalyticsPage /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: /analyticsTitle/i })).toBeInTheDocument();
   });
 
   it('leaves Network page layout available', async () => {

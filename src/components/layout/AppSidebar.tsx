@@ -5,6 +5,8 @@ import {
   Wallet,
   TrendingUp,
   Users,
+  Briefcase,
+  BarChart3,
   Settings,
   Bell,
   LogOut,
@@ -33,6 +35,8 @@ export const tradingNav: { labelKey: TranslationKey; icon: any; path: string }[]
 
 export const networkNav: { labelKey: TranslationKey; icon: any; path: string }[] = [
   { labelKey: 'network', icon: Users, path: '/network' },
+  { labelKey: 'deals', icon: Briefcase, path: '/deals' },
+  { labelKey: 'analytics', icon: BarChart3, path: '/analytics' },
   { labelKey: 'vault', icon: CloudUpload, path: '/vault' },
   { labelKey: 'settings', icon: Settings, path: '/settings' },
 ];
@@ -83,7 +87,7 @@ export function MobileBottomNav({ onMoreClick }: { onMoreClick: () => void }) {
     tradingNav[4],
     networkNav[0],
     tradingNav[3],
-    networkNav[1],
+    networkNav[3],
   ];
 
   return (
