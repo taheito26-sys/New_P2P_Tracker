@@ -17,6 +17,7 @@ import type {
   P2PHistoryPoint
 } from '@/types/domain';
 import { normalizeMarketId } from '@/lib/p2p-markets';
+import type { AgreementTemplate, MerchantAgreement, Order, OrderDraft, CalculationConfig } from '@/lib/trading/types';
 
 export interface PortfolioAnalytics {
   totalDeployed: number;
@@ -307,4 +308,39 @@ export const poll = {
     request<{ invites: MerchantInvite[]; messages: MerchantMessage[] }>(
       `/api/merchant/poll?since=${encodeURIComponent(since)}`
     ),
+};
+
+
+export const agreementTemplates = {
+  list: () => request<{ templates: AgreementTemplate[] }>('/api/agreement-templates'),
+  get: (id: string) => request<{ template: AgreementTemplate }>(`/api/agreement-templates/${id}`),
+  create: (data: Partial<AgreementTemplate> & { name: string; agreementType: AgreementTemplate['agreementType']; calculationMethod: AgreementTemplate['calculationMethod']; calculationConfig: CalculationConfig; defaultCurrency: string; }) =>
+    request<{ template: AgreementTemplate }>('/api/agreement-templates', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<AgreementTemplate>) =>
+    request<{ template: AgreementTemplate }>(`/api/agreement-templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  archive: (id: string) => request<{ ok: boolean }>(`/api/agreement-templates/${id}/archive`, { method: 'POST' }),
+};
+
+export const merchantAgreements = {
+  list: () => request<{ agreements: MerchantAgreement[] }>('/api/merchant-agreements'),
+  get: (id: string) => request<{ agreement: MerchantAgreement }>(`/api/merchant-agreements/${id}`),
+  create: (data: Partial<MerchantAgreement> & { templateId: string; merchantId: string; merchantName: string; title: string; }) =>
+    request<{ agreement: MerchantAgreement }>('/api/merchant-agreements', { method: 'POST', body: JSON.stringify(data) }),
+  submitForApproval: (id: string) => request<{ agreement: MerchantAgreement }>(`/api/merchant-agreements/${id}/submit`, { method: 'POST' }),
+  approve: (id: string) => request<{ agreement: MerchantAgreement }>(`/api/merchant-agreements/${id}/approve`, { method: 'POST' }),
+  reject: (id: string) => request<{ agreement: MerchantAgreement }>(`/api/merchant-agreements/${id}/reject`, { method: 'POST' }),
+  archive: (id: string) => request<{ ok: boolean }>(`/api/merchant-agreements/${id}/archive`, { method: 'POST' }),
+  remove: (id: string) => request<{ ok: boolean; mode: 'delete' | 'archive'; message?: string }>(`/api/merchant-agreements/${id}`, { method: 'DELETE' }),
+  approvedByMerchant: (merchantId: string) => request<{ agreements: MerchantAgreement[] }>(`/api/merchant-agreements/approved?merchantId=${encodeURIComponent(merchantId)}`),
+};
+
+export const orders = {
+  list: () => request<{ orders: Order[] }>('/api/orders'),
+  get: (id: string) => request<{ order: Order }>(`/api/orders/${id}`),
+  create: (data: OrderDraft) => request<{ order: Order }>('/api/orders', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<OrderDraft> & { status?: Order['status'] }) => request<{ order: Order }>(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id: string) => request<{ ok: boolean }>(`/api/orders/${id}`, { method: 'DELETE' }),
+  cancel: (id: string) => request<{ order: Order }>(`/api/orders/${id}/cancel`, { method: 'POST' }),
+  incoming: () => request<{ orders: Order[] }>('/api/orders/incoming'),
+  outgoing: () => request<{ orders: Order[] }>('/api/orders/outgoing'),
 };
