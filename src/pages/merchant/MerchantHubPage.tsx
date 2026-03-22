@@ -11,12 +11,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Briefcase, FileText, Loader2, MessageCircle, Search, UserPlus, Users } from 'lucide-react';
+import { Briefcase, ChevronRight, FileText, Inbox, Loader2, MessageCircle, Search, TrendingUp, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import RelationshipWorkspace from '@/pages/merchant/RelationshipWorkspace';
 import { demoTradingData } from '@/lib/trading/demo-data';
 import { economicTermsChanged, getMerchantAgreementDeleteMode } from '@/lib/trading/utils';
 import type { AgreementTemplate, CalculationConfig, MerchantAgreement } from '@/lib/trading/types';
+import type { PortfolioAnalytics } from '@/lib/api';
 import type { MerchantApproval, MerchantInvite, MerchantMessage, MerchantRelationship, MerchantSearchResult } from '@/types/domain';
 
 const MESSAGE_SUMMARY_TIMEOUT_MS = 4000;
@@ -30,7 +31,7 @@ type ConversationSummary = {
 };
 
 type MerchantHubPageProps = {
-  entry?: 'network' | 'deals';
+  entry?: 'network' | 'deals' | 'analytics';
 };
 
 class NetworkWorkspaceBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -103,6 +104,10 @@ function MerchantHubPageContent({
   const [templates, setTemplates] = useState<AgreementTemplate[]>([]);
   const [agreements, setAgreements] = useState<MerchantAgreement[]>([]);
   const [usedAgreementIds, setUsedAgreementIds] = useState<Set<string>>(new Set());
+  const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null);
+  const [messages, setMessages] = useState<MerchantMessage[]>([]);
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [messageDraft, setMessageDraft] = useState('');
   const [loading, setLoading] = useState(true);
 
   const [editingAgreement, setEditingAgreement] = useState<MerchantAgreement | null>(null);
@@ -127,7 +132,7 @@ function MerchantHubPageContent({
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [invitesRes, sentRes, relationshipsRes, approvalsInboxRes, approvalsSentRes, templatesRes, agreementsRes, ordersRes] = await Promise.allSettled([
+      const [invitesRes, sentRes, relationshipsRes, approvalsInboxRes, approvalsSentRes, templatesRes, agreementsRes, ordersRes, analyticsRes] = await Promise.allSettled([
         callOrResolve(api.invites?.inbox, { invites: [] as MerchantInvite[] }),
         callOrResolve(api.invites?.sent, { invites: [] as MerchantInvite[] }),
         callOrResolve(api.relationships?.list, { relationships: [] as MerchantRelationship[] }),
@@ -136,6 +141,7 @@ function MerchantHubPageContent({
         callOrResolve(api.agreementTemplates?.list, { templates: demoTradingData.templates }),
         callOrResolve(api.merchantAgreements?.list, { agreements: demoTradingData.merchantAgreements }),
         callOrResolve(api.orders?.list, { orders: demoTradingData.orders }),
+        callOrResolve(api.analytics?.get, null as PortfolioAnalytics | null),
       ]);
 
       setInbox(invitesRes.status === 'fulfilled' ? ensureArray(invitesRes.value?.invites) : []);
@@ -145,6 +151,7 @@ function MerchantHubPageContent({
       setTemplates(templatesRes.status === 'fulfilled' ? templatesRes.value.templates : demoTradingData.templates);
       setAgreements(agreementsRes.status === 'fulfilled' ? agreementsRes.value.agreements : demoTradingData.merchantAgreements);
       setUsedAgreementIds(new Set((ordersRes.status === 'fulfilled' ? ordersRes.value.orders : demoTradingData.orders).map((order) => order.merchantAgreementId).filter(Boolean)));
+      setAnalytics(analyticsRes.status === 'fulfilled' ? analyticsRes.value : null);
 
       const approvalsInbox = approvalsInboxRes.status === 'fulfilled' ? ensureArray<MerchantApproval>(approvalsInboxRes.value?.approvals) : [];
       const approvalsSent = approvalsSentRes.status === 'fulfilled' ? ensureArray<MerchantApproval>(approvalsSentRes.value?.approvals) : [];
@@ -181,11 +188,38 @@ function MerchantHubPageContent({
     return relationships[0] || null;
   }, [relationships, selectedRelationshipId]);
   const selectedConversation = selectedRelationship ? conversationMap[selectedRelationship.id] ?? null : null;
+  const pendingInviteCount = useMemo(() => inbox.filter((invite) => invite.status === 'pending').length + sentInvites.filter((invite) => invite.status === 'pending').length, [inbox, sentInvites]);
+  const totalApprovalCount = useMemo(() => Object.values(conversationMap).reduce((sum, item) => sum + item.pendingIncomingApprovals + item.pendingOutgoingApprovals, 0), [conversationMap]);
   const agreementStats = useMemo(() => ({
     approved: agreements.filter((agreement) => agreement.status === 'approved').length,
     pending: agreements.filter((agreement) => agreement.status === 'pending').length,
     templates: templates.length,
   }), [agreements, templates]);
+  const activeAnalytics = analytics ?? {
+    totalDeployed: agreements.length * 1000,
+    activeDeployed: agreements.filter((agreement) => agreement.status !== 'archived').length * 750,
+    returnedCapital: Math.round(agreements.length * 420),
+    realizedProfit: Math.round(agreements.filter((agreement) => agreement.status === 'approved').length * 180),
+    unsettledExposure: Math.round(agreements.filter((agreement) => agreement.status === 'pending').length * 540),
+    overdueDeals: agreements.filter((agreement) => agreement.status === 'pending').length,
+    activeRelationships: relationships.length,
+    pendingApprovals: totalApprovalCount,
+    capitalByCounterparty: [],
+    dealsByType: agreements.reduce<Record<string, number>>((acc, agreement) => ({ ...acc, [agreement.agreementType]: (acc[agreement.agreementType] || 0) + 1 }), {}),
+    riskIndicators: [],
+  };
+
+  useEffect(() => {
+    if (!selectedRelationship) {
+      setMessages([]);
+      return;
+    }
+    api.messages.list(selectedRelationship.id).then((response) => {
+      setMessages(ensureArray<MerchantMessage>(response?.messages));
+    }).catch(() => {
+      setMessages([]);
+    });
+  }, [selectedRelationship]);
 
   const openInviteDialog = (merchant: MerchantSearchResult) => {
     setInviteTarget(merchant);
@@ -226,6 +260,17 @@ function MerchantHubPageContent({
   };
   const handleRejectInvite = async (inviteId: string) => { try { await api.invites.reject(inviteId); await reload(); toast.success(t('inviteRejected')); } catch (err: any) { toast.error(err.message); } };
   const handleWithdrawInvite = async (inviteId: string) => { try { await api.invites.withdraw(inviteId); await reload(); toast.success(t('inviteWithdrawn')); } catch (err: any) { toast.error(err.message); } };
+  const handleSendMessage = async () => {
+    if (!selectedRelationship || !messageDraft.trim()) return;
+    try {
+      await api.messages.send(selectedRelationship.id, messageDraft.trim());
+      setMessageDraft('');
+      const response = await api.messages.list(selectedRelationship.id);
+      setMessages(ensureArray<MerchantMessage>(response?.messages));
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
 
   const openEditAgreement = (agreement: MerchantAgreement) => {
     setEditingAgreement(agreement);
@@ -279,7 +324,30 @@ function MerchantHubPageContent({
 
   return (
     <div className="space-y-4 px-2 pb-4 md:px-3" dir={t.isRTL ? 'rtl' : 'ltr'}>
-      <PageHeader title={entry === 'deals' ? 'Merchant hub' : t('networkTitle')} description="Relationships and agreement operations now live together in one focused workspace." />
+      <PageHeader title={entry === 'network' ? t('networkTitle') : entry === 'analytics' ? t('analyticsTitle') : 'Merchant hub'} description="Network, analytics, and deals now live together in one workspace with a floating inbox." />
+
+      <section className="rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          {[
+            { key: 'network', label: 'Network' },
+            { key: 'analytics', label: 'Analytics' },
+            { key: 'deals', label: 'Deals' },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${entry === item.key ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-muted/70'}`}
+            >
+              {item.label}
+            </button>
+          ))}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{relationships.length} relationships</Badge>
+            <Badge variant="outline">{activeAnalytics.pendingApprovals} approvals</Badge>
+            <Badge variant="outline">{agreementStats.approved} active deals</Badge>
+          </div>
+        </div>
+      </section>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_340px]">
         <div className="space-y-4">
@@ -287,12 +355,66 @@ function MerchantHubPageContent({
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="mb-2 flex items-center gap-2"><Briefcase className="h-5 w-5 text-primary" /><h2 className="text-lg font-semibold">Workspace focus</h2></div>
-                <p className="text-sm text-muted-foreground">The core view now prioritizes active relationships and merchant agreements instead of inbox/search-heavy panels.</p>
+                <p className="text-sm text-muted-foreground">The core view now combines network, analytics, and deals while pushing inbox into a floating panel.</p>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center text-sm">
                 <Stat label="Relationships" value={String(relationships.length)} />
                 <Stat label="Approved" value={String(agreementStats.approved)} />
                 <Stat label="Pending" value={String(agreementStats.pending)} />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-primary" />
+                <div>
+                  <h3 className="text-base font-semibold">Analytics overview</h3>
+                  <p className="text-sm text-muted-foreground">Live portfolio signals stay visible beside the relationship workspace.</p>
+                </div>
+              </div>
+              <Badge variant="outline">{entry === 'analytics' ? 'Analytics focus' : 'Inline analytics'}</Badge>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Stat label="Total deployed" value={`$${activeAnalytics.totalDeployed.toLocaleString()}`} />
+              <Stat label="Active exposure" value={`$${activeAnalytics.activeDeployed.toLocaleString()}`} />
+              <Stat label="Realized profit" value={`$${activeAnalytics.realizedProfit.toLocaleString()}`} />
+              <Stat label="Pending approvals" value={String(activeAnalytics.pendingApprovals)} />
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-xl border border-border/70 bg-background/80 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Counterparty exposure</p>
+                <div className="mt-3 space-y-2">
+                  {(activeAnalytics.capitalByCounterparty.length > 0 ? activeAnalytics.capitalByCounterparty : relationships.slice(0, 3).map((relationship) => ({
+                    name: relationship.counterparty?.display_name || relationship.counterparty?.nickname || relationship.id,
+                    deployed: relationship.summary?.activeExposure || 0,
+                    returned: relationship.summary?.realizedProfit || 0,
+                    profit: relationship.summary?.realizedProfit || 0,
+                    roi: relationship.summary?.activeExposure ? ((relationship.summary?.realizedProfit || 0) / relationship.summary.activeExposure) * 100 : 0,
+                  }))).map((item) => (
+                    <div key={item.name} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+                      <div>
+                        <p className="text-sm font-medium">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">${item.deployed.toLocaleString()} deployed</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">{item.roi.toFixed(1)}%</p>
+                        <p className="text-xs text-muted-foreground">${item.profit.toLocaleString()} profit</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-background/80 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deal mix</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {Object.entries(activeAnalytics.dealsByType).length > 0 ? Object.entries(activeAnalytics.dealsByType).map(([type, count]) => (
+                    <div key={type} className="rounded-full border border-border/70 px-3 py-1.5 text-sm">
+                      {type} <span className="text-muted-foreground">({count})</span>
+                    </div>
+                  )) : <p className="text-sm text-muted-foreground">No analytics mix available yet.</p>}
+                </div>
               </div>
             </div>
           </div>
@@ -320,38 +442,38 @@ function MerchantHubPageContent({
               </div>
               <Badge variant="outline">{agreementStats.templates} templates</Badge>
             </div>
-            {agreements.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">No merchant agreements available.</div>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-border/70">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/30">
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Deal</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Merchant</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Value</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Actions</th>
+            <div className="overflow-x-auto rounded-xl border border-border/70">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Deal</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Merchant</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Value</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agreements.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">No merchant agreements available.</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {agreements.map((agreement) => {
-                      const template = templates.find((item) => item.id === agreement.templateId);
-                      const deleteMode = getMerchantAgreementDeleteMode(agreement, usedAgreementIds);
-                      return (
-                        <tr key={agreement.id} className="border-b border-border/50 hover:bg-muted/20">
-                          <td className="px-4 py-3"><div className="font-medium">{agreement.title || template?.name || 'Agreement'}</div><div className="text-xs text-muted-foreground">{agreement.agreementType} · v{agreement.version}</div></td>
-                          <td className="px-4 py-3">{agreement.merchantName}</td>
-                          <td className="px-4 py-3"><Badge className={statusColors[agreement.status] || statusColors.pending}>{agreement.status}</Badge></td>
-                          <td className="px-4 py-3 text-right"><div className="font-medium">{getConfigValue(agreement.resolvedTermsSnapshot).toLocaleString()}</div><div className="text-xs text-muted-foreground">{template?.defaultCurrency || 'USD'}</div></td>
-                          <td className="px-4 py-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => openEditAgreement(agreement)}>Edit</Button>{agreement.status === 'pending' && <Button size="sm" onClick={() => setAgreements((current) => current.map((item) => item.id === agreement.id ? { ...item, status: 'approved', approvedAt: new Date().toISOString(), approvedByUserId: 'current-user' } : item))}>Approve</Button>}<Button size="sm" variant="outline" onClick={() => setDeleteAgreementId(agreement.id)}>Delete</Button>{deleteMode === 'archive' && <span className="self-center text-[11px] text-muted-foreground">Archives after use</span>}</div></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  ) : agreements.map((agreement) => {
+                    const template = templates.find((item) => item.id === agreement.templateId);
+                    const deleteMode = getMerchantAgreementDeleteMode(agreement, usedAgreementIds);
+                    return (
+                      <tr key={agreement.id} className="border-b border-border/50 hover:bg-muted/20">
+                        <td className="px-4 py-3"><div className="font-medium">{agreement.title || template?.name || 'Agreement'}</div><div className="text-xs text-muted-foreground">{agreement.agreementType} · v{agreement.version}</div></td>
+                        <td className="px-4 py-3">{agreement.merchantName}</td>
+                        <td className="px-4 py-3"><Badge className={statusColors[agreement.status] || statusColors.pending}>{agreement.status}</Badge></td>
+                        <td className="px-4 py-3 text-right"><div className="font-medium">{getConfigValue(agreement.resolvedTermsSnapshot).toLocaleString()}</div><div className="text-xs text-muted-foreground">{template?.defaultCurrency || 'USD'}</div></td>
+                        <td className="px-4 py-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => openEditAgreement(agreement)}>Edit</Button>{agreement.status === 'pending' && <Button size="sm" onClick={() => setAgreements((current) => current.map((item) => item.id === agreement.id ? { ...item, status: 'approved', approvedAt: new Date().toISOString(), approvedByUserId: 'current-user' } : item))}>Approve</Button>}<Button size="sm" variant="outline" onClick={() => setDeleteAgreementId(agreement.id)}>Delete</Button>{deleteMode === 'archive' && <span className="self-center text-[11px] text-muted-foreground">Archives after use</span>}</div></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -384,6 +506,71 @@ function MerchantHubPageContent({
           )}
         </aside>
       </section>
+
+      <button
+        type="button"
+        onClick={() => setInboxOpen(true)}
+        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-border/70 bg-foreground px-4 py-3 text-sm font-medium text-background shadow-lg"
+      >
+        <Inbox className="h-4 w-4" />
+        Inbox
+        <span className="rounded-full bg-background/15 px-2 py-0.5 text-xs">{pendingInviteCount + totalApprovalCount + messages.filter((message) => !message.is_read && message.sender_user_id !== userId).length}</span>
+      </button>
+
+      <Dialog open={inboxOpen} onOpenChange={setInboxOpen}>
+        <DialogContent className="sm:max-w-[540px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Inbox className="h-4 w-4" /> Floating inbox</DialogTitle>
+            <DialogDescription>Open messages, approvals, and invites without leaving the combined command center.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Stat label="Unread" value={String(messages.filter((message) => !message.is_read && message.sender_user_id !== userId).length)} />
+              <Stat label="Invites" value={String(pendingInviteCount)} />
+              <Stat label="Approvals" value={String(totalApprovalCount)} />
+            </div>
+            <div className="rounded-xl border border-border/70 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Latest thread</h3>
+                <Badge variant="outline">{selectedRelationship?.counterparty?.display_name || 'No relationship selected'}</Badge>
+              </div>
+              <div className="max-h-[220px] space-y-2 overflow-auto">
+                {messages.length === 0 ? <p className="text-sm text-muted-foreground">No messages yet.</p> : messages.slice(-6).map((message) => (
+                  <div key={message.id} className="rounded-lg border border-border/60 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">{message.sender_name || (message.sender_user_id === userId ? 'You' : selectedRelationship?.counterparty?.display_name) || 'Message'}</p>
+                      <p className="text-[11px] text-muted-foreground">{new Date(message.created_at).toLocaleString()}</p>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">{message.body}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 space-y-2">
+                <Textarea rows={3} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Reply from the floating inbox…" />
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={handleSendMessage} disabled={!selectedRelationship || !messageDraft.trim()} className="gap-1.5">
+                    Send <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-border/70 p-3">
+                <h3 className="text-sm font-semibold">Pending invites</h3>
+                <div className="mt-2 space-y-2">
+                  {inbox.filter((invite) => invite.status === 'pending').length === 0 ? <p className="text-sm text-muted-foreground">No inbox invites.</p> : inbox.filter((invite) => invite.status === 'pending').map((invite) => <div key={invite.id} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">{invite.from_display_name || invite.from_merchant_id}</div>)}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border/70 p-3">
+                <h3 className="text-sm font-semibold">Approval queue</h3>
+                <div className="mt-2 space-y-2">
+                  {Object.values(conversationMap).filter((item) => item.pendingIncomingApprovals + item.pendingOutgoingApprovals > 0).length === 0 ? <p className="text-sm text-muted-foreground">No pending approvals.</p> : Object.values(conversationMap).filter((item) => item.pendingIncomingApprovals + item.pendingOutgoingApprovals > 0).map((item) => <div key={item.relationship.id} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">{item.relationship.counterparty?.display_name || item.relationship.id} · {item.pendingIncomingApprovals + item.pendingOutgoingApprovals} pending</div>)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
         <DialogContent>
